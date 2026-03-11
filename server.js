@@ -1,0 +1,132 @@
+const express = require('express');
+const cors = require('cors');
+const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+require('dotenv').config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = 3001;
+const {
+  ZOHO_CLIENT_ID,
+  ZOHO_CLIENT_SECRET,
+  ZOHO_REFRESH_TOKEN,
+  ZOHO_ORG_ID,
+} = process.env;
+
+let cachedToken = null;
+let tokenExpiry = null;
+let cachedOrders = null;
+let ordersCachedAt = null;
+const CACHE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+
+async function getAccessToken() {
+  const now = Date.now();
+  if (cachedToken && tokenExpiry && now < tokenExpiry) {
+    return cachedToken;
+  }
+
+  console.log('🔄 Refreshing Zoho access token...');
+  const params = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: ZOHO_CLIENT_ID,
+    client_secret: ZOHO_CLIENT_SECRET,
+    refresh_token: ZOHO_REFRESH_TOKEN,
+  });
+
+  const res = await fetch(`https://accounts.zoho.com/oauth/v2/token`, {
+    method: 'POST',
+    body: params,
+  });
+
+  const data = await res.json();
+  if (!data.access_token) {
+    throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
+  }
+
+  cachedToken = data.access_token;
+  tokenExpiry = now + (data.expires_in - 60) * 1000; // refresh 60s early
+  console.log('✅ Token refreshed successfully');
+  return cachedToken;
+}
+
+async function fetchAllOrders(token) {
+  let allOrders = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= 15) {
+    const url = new URL('https://www.zohoapis.com/inventory/v1/salesorders');
+    url.searchParams.set('organization_id', ZOHO_ORG_ID);
+    url.searchParams.set('per_page', '200');
+    url.searchParams.set('page', page);
+    url.searchParams.set('sort_column', 'date');
+    url.searchParams.set('sort_order', 'D');
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    });
+
+    if (!res.ok) throw new Error(`Zoho API error: ${res.status}`);
+    const data = await res.json();
+    const orders = data.salesorders || [];
+    allOrders = [...allOrders, ...orders];
+    hasMore = data.page_context?.has_more_page || false;
+    page++;
+    console.log(`📦 Loaded page ${page - 1}: ${orders.length} orders (total: ${allOrders.length})`);
+  }
+
+  return allOrders;
+}
+
+// GET /api/token — returns a fresh access token to the frontend
+app.get('/api/token', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    res.json({ access_token: token });
+  } catch (e) {
+    console.error('Token error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/orders — returns all orders, cached for 30 minutes
+app.get('/api/orders', async (req, res) => {
+  try {
+    const now = Date.now();
+    const forceRefresh = req.query.refresh === 'true';
+
+    if (!forceRefresh && cachedOrders && ordersCachedAt && (now - ordersCachedAt) < CACHE_DURATION_MS) {
+      console.log('📋 Serving cached orders');
+      return res.json({ orders: cachedOrders, cached: true, cachedAt: ordersCachedAt });
+    }
+
+    const token = await getAccessToken();
+    console.log('🌐 Fetching fresh orders from Zoho...');
+    const orders = await fetchAllOrders(token);
+    cachedOrders = orders;
+    ordersCachedAt = now;
+    res.json({ orders, cached: false, cachedAt: ordersCachedAt });
+  } catch (e) {
+    console.error('Orders error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/status — health check
+app.get('/api/status', (req, res) => {
+  res.json({
+    status: 'ok',
+    tokenCached: !!cachedToken,
+    ordersCached: !!cachedOrders,
+    orderCount: cachedOrders?.length || 0,
+    cacheAge: ordersCachedAt ? Math.round((Date.now() - ordersCachedAt) / 60000) + ' min' : 'none',
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`\n🚀 Order Cycle Tracker server running on http://localhost:${PORT}`);
+  console.log(`   Token auto-refresh: ✅ enabled`);
+  console.log(`   Order cache: 30 minutes\n`);
+});
