@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 require('dotenv').config();
 
@@ -124,6 +126,27 @@ app.get('/api/status', (req, res) => {
     cacheAge: ordersCachedAt ? Math.round((Date.now() - ordersCachedAt) / 60000) + ' min' : 'none',
   });
 });
+
+const buildPath = path.join(__dirname, 'build');
+
+console.log(`📁 Build folder exists: ${fs.existsSync(buildPath)}`);
+console.log(`📁 Build path: ${buildPath}`);
+
+if (fs.existsSync(buildPath)) {
+  app.use(express.static(buildPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(buildPath, 'index.html'));
+  });
+} else {
+  app.get('*', (req, res) => {
+    res.status(200).send(`
+      <h2>Server is running but React build is missing.</h2>
+      <p>Build path checked: ${buildPath}</p>
+      <p>Run npm run build to generate the build folder.</p>
+      <p><a href="/api/status">Check API status</a></p>
+    `);
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Order Cycle Tracker server running on http://localhost:${PORT}`);
