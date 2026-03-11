@@ -95,6 +95,11 @@ app.get('/api/token', async (req, res) => {
 
 // GET /api/orders — returns all orders, cached for 30 minutes
 app.get('/api/orders', async (req, res) => {
+  const missing = ['ZOHO_CLIENT_ID', 'ZOHO_CLIENT_SECRET', 'ZOHO_REFRESH_TOKEN', 'ZOHO_ORG_ID']
+    .filter((k) => !process.env[k]);
+  if (missing.length) {
+    return res.status(500).json({ error: `Missing environment variables: ${missing.join(', ')}` });
+  }
   try {
     const now = Date.now();
     const forceRefresh = req.query.refresh === 'true';

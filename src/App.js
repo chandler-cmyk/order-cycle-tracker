@@ -130,8 +130,8 @@ export default function App() {
       setProgress('Loading orders from Zoho Inventory...');
       const url = forceRefresh ? '/api/orders?refresh=true' : '/api/orders';
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server error: ${res.status}`);
       if (data.error) throw new Error(data.error);
 
       setProgress(`Processing ${data.orders.length} orders...`);
