@@ -134,11 +134,11 @@ console.log(`📁 Build path: ${buildPath}`);
 
 if (fs.existsSync(buildPath)) {
   app.use(express.static(buildPath));
-  app.get('*', (req, res) => {
+  app.get('/{*path}', (req, res) => {
     res.sendFile(path.join(buildPath, 'index.html'));
   });
 } else {
-  app.get('*', (req, res) => {
+  app.get('/{*path}', (req, res) => {
     res.status(200).send(`
       <h2>Server is running but React build is missing.</h2>
       <p>Build path checked: ${buildPath}</p>
