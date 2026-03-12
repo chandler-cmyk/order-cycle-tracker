@@ -265,10 +265,6 @@ export function processOrders(salesOrders) {
       qty: parseFloat(li.quantity) || 0,
       value: parseFloat(li.item_total) || (parseFloat(li.quantity || 0) * parseFloat(li.rate || 0)) || 0,
     }));
-    if (salesOrders && salesOrders.length > 0) {
-      const sampleItem = order.line_items?.[0];
-      if (sampleItem) console.log('Sample line item fields:', JSON.stringify(sampleItem));
-    }
     const skuNames = lineItems.map((li) => li.name);
 
     if (!customerMap[id]) {
