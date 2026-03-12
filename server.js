@@ -185,6 +185,31 @@ app.get('/api/debug', (req, res) => {
   });
 });
 
+// GET /api/debug/sample-order — fetches one order's full line item for field inspection
+app.get('/api/debug/sample-order', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const url = new URL('https://www.zohoapis.com/inventory/v1/salesorders');
+    url.searchParams.set('organization_id', ZOHO_ORG_ID);
+    url.searchParams.set('per_page', '1');
+    url.searchParams.set('page', '1');
+    const result = await fetch(url.toString(), {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    });
+    const data = await result.json();
+    const order = data.salesorders?.[0];
+    if (!order) return res.json({ error: 'No orders found' });
+    const detailUrl = `https://www.zohoapis.com/inventory/v1/salesorders/${order.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
+    const detailRes = await fetch(detailUrl, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    });
+    const detailData = await detailRes.json();
+    res.json(detailData.salesorder?.line_items?.[0] || { error: 'No line items found' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/status — health check
 app.get('/api/status', (req, res) => {
   res.json({
