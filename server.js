@@ -5,6 +5,47 @@ const fs = require('fs');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 require('dotenv').config();
 
+// Keep in sync with SUB_CUSTOMERS in src/utils.js
+const SUB_CUSTOMERS = [
+  'J&A Greensboro',
+  'S&A Wholesale',
+  'M&A Distro',
+  'Eagle Wholesale',
+  'Quality Distribution',
+  'Magical Vapors',
+  'High Altitude Wholesale',
+  'Sunrise Wholesale',
+  'Eagle Highborn',
+  'Kali King',
+  'Novelty King',
+  'Malani Enterprise',
+  'TN Smoke',
+  'Cryptic Trading',
+  'Big Z Distribution',
+  'Music City Imports',
+  'ARC Wholesale',
+  'Down South Distro',
+  'Aimrock Distributors',
+  'Zee Hot Spot',
+  'MDK Family Inc',
+  'Wholesale Outlet',
+  'MAG Industries',
+  'Tri State Distro',
+  'BNC Distribution Inc',
+  'Skokie Wholesale',
+  'Good Price Wholesale',
+  'Global Cash & Carry Inc',
+  'Loop Distribution',
+  'Wiseman Wholesale',
+  'Kriaa Wholesale',
+  'A2Z Charlotte',
+  'AAA Houston',
+  'AAA Wholesale Supply',
+  'Labib Wilmington',
+  'RAM Wholesale',
+  'Center Point Distribution',
+];
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -94,16 +135,38 @@ async function enrichOrdersWithLineItems(orders, token) {
     byCustomer[o.customer_id].push({ date: o.date, idx });
   });
 
-  const toEnrich = [];
+  const toEnrichSet = new Set();
+
+  // Top 5 most recent orders per customer (for parent customer SKU data)
   Object.values(byCustomer).forEach((entries) => {
     entries.sort((a, b) => (a.date < b.date ? 1 : -1));
-    entries.slice(0, 5).forEach(({ idx }) => toEnrich.push(idx));
+    entries.slice(0, 5).forEach(({ idx }) => toEnrichSet.add(idx));
   });
+
+  // Top 3 most recent orders per sub-customer reference match
+  // (these may fall outside the parent's top 5)
+  const subLower = SUB_CUSTOMERS.map((s) => s.toLowerCase());
+  const bySubCustomer = {};
+  orders.forEach((o, idx) => {
+    const ref = (o.reference_number || '').toLowerCase();
+    if (!ref) return;
+    const match = subLower.find((s) => ref.includes(s));
+    if (match) {
+      if (!bySubCustomer[match]) bySubCustomer[match] = [];
+      bySubCustomer[match].push({ date: o.date, idx });
+    }
+  });
+  Object.values(bySubCustomer).forEach((entries) => {
+    entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+    entries.slice(0, 3).forEach(({ idx }) => toEnrichSet.add(idx));
+  });
+
+  const toEnrich = Array.from(toEnrichSet);
 
   const enriched = [...orders];
   let successCount = 0;
   let failCount = 0;
-  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (last 3 per customer, ${BATCH_SIZE} at a time)...`);
+  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (top 5/customer + sub-customer orders, ${BATCH_SIZE} at a time)...`);
 
   for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
     const batch = toEnrich.slice(i, i + BATCH_SIZE);
