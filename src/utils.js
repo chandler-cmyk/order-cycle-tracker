@@ -26,7 +26,7 @@ export function processOrders(salesOrders) {
     const date = new Date(order.date);
     const value = parseFloat(order.total) || 0;
     const items = (order.line_items || []).map((li) => li.name || li.item_name || 'Unknown');
-    const qty = (order.line_items || []).reduce((sum, li) => sum + (parseFloat(li.quantity) || 0), 0);
+    const qty = parseFloat(order.quantity) || 0;
 
     if (!customerMap[id]) {
       customerMap[id] = { id, name, orders: [], totalValue: 0, skus: new Set() };
