@@ -162,7 +162,7 @@ function buildCustomerStats(c) {
       overdueScore = Math.min(daysOverdue / avgCadenceDays, 1);
     }
 
-    // 2. Frequency trend (25%) — increasing gap between recent orders vs historical avg
+    // 2. Frequency trend (25%) — neutral within ±20%, risk scales from 20%→50%+ gap increase
     let freqTrendScore = 0;
     if (sorted.length >= 4) {
       const allGaps = [];
@@ -172,25 +172,38 @@ function buildCustomerStats(c) {
       const avgAllGap = allGaps.reduce((a, b) => a + b, 0) / allGaps.length;
       const recentGaps = allGaps.slice(-2); // last 3 orders = 2 gaps
       const avgRecentGap = recentGaps.reduce((a, b) => a + b, 0) / recentGaps.length;
-      freqTrendScore = avgAllGap > 0
-        ? Math.min(Math.max((avgRecentGap - avgAllGap) / avgAllGap, 0), 1)
-        : 0;
+      if (avgAllGap > 0) {
+        const pctIncrease = (avgRecentGap - avgAllGap) / avgAllGap; // negative = ordering faster
+        if (pctIncrease > 0.20) {
+          // Scale 0→1 from 20% increase up to 50% increase
+          freqTrendScore = Math.min((pctIncrease - 0.20) / 0.30, 1);
+        }
+        // ordering more frequently or within 20% neutral band → 0
+      }
     } else if (sorted.length < 3) {
       freqTrendScore = 0.5; // not enough history, moderate uncertainty
     }
 
-    // 3. Order size trend (25%) — shrinking spend vs historical avg
+    // 3. Order size trend (25%) — neutral within ±15%, risk scales from 15%→40%+ drop
     let sizeTrendScore = 0;
     if (sorted.length >= 2) {
       const allAvgValue = sorted.reduce((s, o) => s + o.value, 0) / sorted.length;
       const recentAvgValue = last3.reduce((s, o) => s + o.value, 0) / last3.length;
       if (allAvgValue > 0) {
-        sizeTrendScore = Math.min(Math.max((allAvgValue - recentAvgValue) / allAvgValue, 0), 1);
+        const pctDrop = (allAvgValue - recentAvgValue) / allAvgValue; // negative = growing spend
+        if (pctDrop > 0.15) {
+          // Scale 0→1 from 15% drop up to 40% drop
+          sizeTrendScore = Math.min((pctDrop - 0.15) / 0.25, 1);
+        }
+        // growing spend or within 15% neutral band → 0
       }
     }
 
-    // 4. Order count (10%) — fewer orders = less confidence, higher risk
-    const orderCountScore = sorted.length < 3 ? 1 : sorted.length < 5 ? 0.5 : 0;
+    // 4. Order count (10%)
+    const orderCountScore = sorted.length === 0 ? 1
+      : sorted.length <= 2 ? 0.8
+      : sorted.length <= 4 ? 0.4
+      : 0; // 5+ orders: loyalty established
 
     // 5. Recency (10%) — days since last order relative to 1.5× cadence
     let recencyScore = 0;
@@ -198,13 +211,20 @@ function buildCustomerStats(c) {
       recencyScore = Math.min(daysSinceLastOrder / (avgCadenceDays * 1.5), 1);
     }
 
-    churnScore = Math.round(
+    const rawScore =
       overdueScore   * 30 +
       freqTrendScore * 25 +
       sizeTrendScore * 25 +
       orderCountScore * 10 +
-      recencyScore   * 10
-    );
+      recencyScore   * 10;
+
+    // Loyalty bonus — subtract points for long-term customers
+    const loyaltyBonus = sorted.length >= 20 ? 18
+      : sorted.length >= 15 ? 12
+      : sorted.length >= 10 ? 8
+      : 0;
+
+    churnScore = Math.max(Math.round(rawScore - loyaltyBonus), 0);
     churnRisk = churnScore >= 67 ? 'High' : churnScore >= 34 ? 'Medium' : 'Low';
   }
 
