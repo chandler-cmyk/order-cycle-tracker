@@ -155,6 +155,9 @@ app.get('/api/orders', async (req, res) => {
     const token = await getAccessToken();
     console.log('🌐 Fetching fresh orders from Zoho...');
     const orders = await fetchAllOrders(token);
+    if (orders.length > 0) {
+      console.log('Sample order line_items:', JSON.stringify(orders[0].line_items?.slice(0, 2)));
+    }
     const enriched = await enrichOrdersWithLineItems(orders, token);
     cachedOrders = enriched;
     ordersCachedAt = now;
