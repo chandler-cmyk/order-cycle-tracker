@@ -121,6 +121,23 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
+// GET /api/debug — returns first cached order to inspect field names
+app.get('/api/debug', (req, res) => {
+  if (!cachedOrders || cachedOrders.length === 0) {
+    return res.json({ error: 'No cached orders yet. Hit /api/orders first.' });
+  }
+  const sample = cachedOrders[0];
+  res.json({
+    fields: Object.keys(sample),
+    total: sample.total,
+    total_amount: sample.total_amount,
+    bcy_total: sample.bcy_total,
+    sub_total: sample.sub_total,
+    line_items_count: (sample.line_items || []).length,
+    line_items_sample: (sample.line_items || []).slice(0, 1),
+  });
+});
+
 // GET /api/status — health check
 app.get('/api/status', (req, res) => {
   res.json({
