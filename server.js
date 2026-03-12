@@ -101,6 +101,8 @@ async function enrichOrdersWithLineItems(orders, token) {
   });
 
   const enriched = [...orders];
+  let successCount = 0;
+  let failCount = 0;
   console.log(`🔍 Fetching line items for ${toEnrich.length} orders (last 3 per customer, ${BATCH_SIZE} at a time)...`);
 
   for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
@@ -110,18 +112,34 @@ async function enrichOrdersWithLineItems(orders, token) {
       try {
         const url = `https://www.zohoapis.com/inventory/v1/salesorders/${order.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
         const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.warn(`  ⚠️ Order ${order.salesorder_id} returned ${res.status}`);
+          failCount++;
+          return;
+        }
         const data = await res.json();
         if (data.salesorder && Array.isArray(data.salesorder.line_items)) {
           enriched[orderIdx].line_items = data.salesorder.line_items;
+          if (data.salesorder.line_items.length === 0) {
+            console.warn(`  ⚠️ Order ${order.salesorder_id} has 0 line items`);
+          }
+          successCount++;
+        } else {
+          console.warn(`  ⚠️ Order ${order.salesorder_id} missing line_items in response`);
+          failCount++;
         }
-      } catch {
-        // skip silently — order keeps empty line_items
+      } catch (e) {
+        console.error(`  ❌ Order ${order.salesorder_id} fetch error: ${e.message}`);
+        failCount++;
       }
     }));
-    console.log(`  ✅ ${Math.min(i + BATCH_SIZE, toEnrich.length)}/${toEnrich.length}`);
+    // Small delay between batches to avoid Zoho rate limits
+    if (i + BATCH_SIZE < toEnrich.length) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
   }
 
+  console.log(`✅ Enrichment done: ${successCount} succeeded, ${failCount} failed`);
   return enriched;
 }
 
