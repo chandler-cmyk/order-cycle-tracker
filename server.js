@@ -97,7 +97,7 @@ async function enrichOrdersWithLineItems(orders, token) {
   const toEnrich = [];
   Object.values(byCustomer).forEach((entries) => {
     entries.sort((a, b) => (a.date < b.date ? 1 : -1));
-    entries.slice(0, 3).forEach(({ idx }) => toEnrich.push(idx));
+    entries.slice(0, 5).forEach(({ idx }) => toEnrich.push(idx));
   });
 
   const enriched = [...orders];
