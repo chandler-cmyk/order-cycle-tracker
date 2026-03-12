@@ -82,32 +82,44 @@ async function fetchAllOrders(token) {
   return allOrders;
 }
 
-// Fetch full order details (including line_items) for each order in batches
+// Fetch line_items only for the 3 most recent orders per customer —
+// that's all we need for per-SKU tracking and churn signals.
 async function enrichOrdersWithLineItems(orders, token) {
-  const BATCH_SIZE = 10; // concurrent requests per batch
+  const BATCH_SIZE = 20;
+
+  // Group order indices by customer, sorted newest-first
+  const byCustomer = {};
+  orders.forEach((o, idx) => {
+    if (!byCustomer[o.customer_id]) byCustomer[o.customer_id] = [];
+    byCustomer[o.customer_id].push({ date: o.date, idx });
+  });
+
+  const toEnrich = [];
+  Object.values(byCustomer).forEach((entries) => {
+    entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+    entries.slice(0, 3).forEach(({ idx }) => toEnrich.push(idx));
+  });
+
   const enriched = [...orders];
+  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (last 3 per customer, ${BATCH_SIZE} at a time)...`);
 
-  console.log(`🔍 Fetching line items for ${orders.length} orders in batches of ${BATCH_SIZE}...`);
-
-  for (let i = 0; i < enriched.length; i += BATCH_SIZE) {
-    const batch = enriched.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (order, batchIdx) => {
+  for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
+    const batch = toEnrich.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async (orderIdx) => {
+      const order = enriched[orderIdx];
       try {
         const url = `https://www.zohoapis.com/inventory/v1/salesorders/${order.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
-        const res = await fetch(url, {
-          headers: { Authorization: `Zoho-oauthtoken ${token}` },
-        });
-        if (!res.ok) return; // skip on error, keep order without line items
+        const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+        if (!res.ok) return;
         const data = await res.json();
-        const detail = data.salesorder;
-        if (detail && Array.isArray(detail.line_items)) {
-          enriched[i + batchIdx].line_items = detail.line_items;
+        if (data.salesorder && Array.isArray(data.salesorder.line_items)) {
+          enriched[orderIdx].line_items = data.salesorder.line_items;
         }
       } catch {
-        // skip silently — order will have empty line_items
+        // skip silently — order keeps empty line_items
       }
     }));
-    console.log(`  ✅ Enriched ${Math.min(i + BATCH_SIZE, enriched.length)}/${enriched.length} orders`);
+    console.log(`  ✅ ${Math.min(i + BATCH_SIZE, toEnrich.length)}/${toEnrich.length}`);
   }
 
   return enriched;
@@ -146,7 +158,7 @@ app.get('/api/orders', async (req, res) => {
     const enriched = await enrichOrdersWithLineItems(orders, token);
     cachedOrders = enriched;
     ordersCachedAt = now;
-    res.json({ orders, cached: false, cachedAt: ordersCachedAt });
+    res.json({ orders: enriched, cached: false, cachedAt: ordersCachedAt });
   } catch (e) {
     console.error('Orders error:', e.message);
     res.status(500).json({ error: e.message });
