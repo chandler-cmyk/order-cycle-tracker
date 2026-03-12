@@ -82,6 +82,37 @@ async function fetchAllOrders(token) {
   return allOrders;
 }
 
+// Fetch full order details (including line_items) for each order in batches
+async function enrichOrdersWithLineItems(orders, token) {
+  const BATCH_SIZE = 10; // concurrent requests per batch
+  const enriched = [...orders];
+
+  console.log(`🔍 Fetching line items for ${orders.length} orders in batches of ${BATCH_SIZE}...`);
+
+  for (let i = 0; i < enriched.length; i += BATCH_SIZE) {
+    const batch = enriched.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async (order, batchIdx) => {
+      try {
+        const url = `https://www.zohoapis.com/inventory/v1/salesorders/${order.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        });
+        if (!res.ok) return; // skip on error, keep order without line items
+        const data = await res.json();
+        const detail = data.salesorder;
+        if (detail && Array.isArray(detail.line_items)) {
+          enriched[i + batchIdx].line_items = detail.line_items;
+        }
+      } catch {
+        // skip silently — order will have empty line_items
+      }
+    }));
+    console.log(`  ✅ Enriched ${Math.min(i + BATCH_SIZE, enriched.length)}/${enriched.length} orders`);
+  }
+
+  return enriched;
+}
+
 // GET /api/token — returns a fresh access token to the frontend
 app.get('/api/token', async (req, res) => {
   try {
@@ -112,7 +143,8 @@ app.get('/api/orders', async (req, res) => {
     const token = await getAccessToken();
     console.log('🌐 Fetching fresh orders from Zoho...');
     const orders = await fetchAllOrders(token);
-    cachedOrders = orders;
+    const enriched = await enrichOrdersWithLineItems(orders, token);
+    cachedOrders = enriched;
     ordersCachedAt = now;
     res.json({ orders, cached: false, cachedAt: ordersCachedAt });
   } catch (e) {
