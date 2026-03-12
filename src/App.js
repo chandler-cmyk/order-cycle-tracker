@@ -12,6 +12,12 @@ const dlabel = {
 };
 const dval = { fontSize: 13, color: '#111827', fontWeight: 500 };
 
+const CHURN_COLORS = {
+  Low:    { color: '#10b981', bg: '#f0fdf4', border: '#bbf7d0' },
+  Medium: { color: '#f59e0b', bg: '#fffbeb', border: '#fde68a' },
+  High:   { color: '#ef4444', bg: '#fef2f2', border: '#fecaca' },
+};
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, accent }) {
   return (
@@ -39,6 +45,19 @@ function StatusBadge({ status }) {
   );
 }
 
+function ChurnRiskBadge({ risk }) {
+  const cfg = CHURN_COLORS[risk] || { color: '#9ca3af', bg: '#f9fafb', border: '#d1d5db' };
+  return (
+    <span style={{
+      display: 'inline-block', padding: '3px 10px', borderRadius: 20,
+      fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg,
+      border: `1px solid ${cfg.border}`, letterSpacing: '0.03em',
+    }}>
+      {risk}
+    </span>
+  );
+}
+
 function CustomerRow({ customer, index }) {
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -59,6 +78,7 @@ function CustomerRow({ customer, index }) {
         }}
       >
         <td style={td}><StatusBadge status={customer.cycleStatus} /></td>
+        <td style={td}><ChurnRiskBadge risk={customer.churnRisk} /></td>
         <td style={{ ...td, fontWeight: 600, color: '#111827' }}>
           {customer.name}
           {customer.viaCustomer && (
@@ -84,8 +104,8 @@ function CustomerRow({ customer, index }) {
       </tr>
       {expanded && (
         <tr style={{ background: '#f8faff' }}>
-          <td colSpan={10} style={{ padding: '14px 24px 18px' }}>
-            <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap' }}>
+          <td colSpan={11} style={{ padding: '14px 24px 18px' }}>
+            <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', marginBottom: 20 }}>
               <div>
                 <div style={dlabel}>Next Expected Order</div>
                 <div style={dval}>{customer.nextExpected ? fmtDate(customer.nextExpected) : 'Not enough order history'}</div>
@@ -103,19 +123,60 @@ function CustomerRow({ customer, index }) {
                 <div style={dval}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : '—'}</div>
               </div>
               <div>
-                <div style={dlabel}>SKUs / Flavors Ordered</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                  {customer.skus.length > 0
-                    ? customer.skus.map((s) => (
-                        <span key={s} style={{ background: '#e0f2fe', color: '#0369a1', borderRadius: 6, padding: '2px 9px', fontSize: 11, fontWeight: 500 }}>{s}</span>
-                      ))
-                    : <span style={{ color: '#9ca3af', fontSize: 13 }}>No SKU data</span>}
+                <div style={dlabel}>Churn Risk Score</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <ChurnRiskBadge risk={customer.churnRisk} />
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>{customer.churnScore}/100</span>
                 </div>
               </div>
               <div>
                 <div style={dlabel}>Total Lifetime Value</div>
                 <div style={dval}>{customer.orderCount} orders · {fmtCurrency(customer.totalValue)}</div>
               </div>
+            </div>
+
+            {/* Per-SKU Breakdown */}
+            <div>
+              <div style={dlabel}>SKU / Flavor Breakdown</div>
+              {customer.skus.length === 0 ? (
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No SKU data — line items not available from Zoho list API</span>
+              ) : (
+                <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9' }}>
+                        {['SKU / Flavor', 'Last Order', 'Avg Cadence', 'Next Expected', 'Status', 'Avg Qty (last 3)'].map((h) => (
+                          <th key={h} style={{
+                            padding: '7px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+                            color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em',
+                            borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap',
+                          }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customer.skus.map((sku) => (
+                        <tr key={sku.name} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '7px 12px', fontWeight: 600, color: '#111827' }}>{sku.name}</td>
+                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.lastOrderDate ? fmtDate(sku.lastOrderDate) : '—'}</td>
+                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.avgCadenceDays ? `${sku.avgCadenceDays}d` : '—'}</td>
+                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.nextExpected ? fmtDate(sku.nextExpected) : '—'}</td>
+                          <td style={{ padding: '7px 12px' }}>
+                            {sku.daysOverdue != null
+                              ? <span style={{ color: '#ef4444', fontWeight: 700 }}>{sku.daysOverdue}d overdue</span>
+                              : sku.daysUntilNext != null
+                              ? <span style={{ color: '#10b981', fontWeight: 600 }}>In {sku.daysUntilNext}d</span>
+                              : <StatusBadge status={sku.cycleStatus} />}
+                          </td>
+                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.avgQty != null ? `${sku.avgQty} units` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </td>
         </tr>
@@ -131,6 +192,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterChurnRisk, setFilterChurnRisk] = useState('all');
   const [sortBy, setSortBy] = useState('overdue');
   const [lastRefresh, setLastRefresh] = useState(null);
   const [fromCache, setFromCache] = useState(false);
@@ -172,12 +234,14 @@ export default function App() {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     if (sortBy === 'value') return b.totalValue - a.totalValue;
     if (sortBy === 'orders') return b.orderCount - a.orderCount;
+    if (sortBy === 'churn') return b.churnScore - a.churnScore;
     return 0;
   };
 
   const filtered = activeCustomers
     .filter((c) => {
       if (filterStatus !== 'all' && c.cycleStatus !== filterStatus) return false;
+      if (filterChurnRisk !== 'all' && c.churnRisk !== filterChurnRisk) return false;
       if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     })
@@ -193,6 +257,7 @@ export default function App() {
     on_track:     activeCustomers.filter((c) => c.cycleStatus === 'on_track').length,
     new_customer: activeCustomers.filter((c) => c.cycleStatus === 'new_customer').length,
     inactive:     inactiveCustomers.length,
+    highRisk:     customers.filter((c) => c.churnRisk === 'High').length,
   };
   const totalRevenue = customers.reduce((s, c) => s + c.totalValue, 0);
 
@@ -223,7 +288,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ padding: '24px 32px', maxWidth: 1600, margin: '0 auto' }}>
 
         {/* Error */}
         {error && (
@@ -253,52 +318,76 @@ export default function App() {
             <StatCard label="On Track" value={counts.on_track} sub="No action needed" accent="#10b981" />
             <StatCard label="New Customers" value={counts.new_customer} sub="Not enough history yet" accent="#6366f1" />
             <StatCard label="Inactive" value={counts.inactive} sub={`No orders in ${INACTIVE_DAYS}+ days`} accent="#6b7280" />
+            <StatCard label="High Risk" value={counts.highRisk} sub="High churn probability" accent="#ef4444" />
           </div>
         )}
 
         {/* Filters */}
         {!loading && customers.length > 0 && (
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              placeholder="Search customer…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '7px 14px', fontSize: 13, outline: 'none', width: 200 }}
-            />
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {['all', 'overdue', 'due_soon', 'on_track', 'new_customer'].map((s) => {
-                const cfg = STATUS_CONFIG[s];
-                const active = filterStatus === s;
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 18px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Row 1: search + status filters + inactive toggle + sort */}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                placeholder="Search customer…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '7px 14px', fontSize: 13, outline: 'none', width: 200 }}
+              />
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['all', 'overdue', 'due_soon', 'on_track', 'new_customer'].map((s) => {
+                  const cfg = STATUS_CONFIG[s];
+                  const active = filterStatus === s;
+                  return (
+                    <button key={s} onClick={() => setFilterStatus(s)} style={{
+                      padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      border: active ? `1px solid ${cfg?.color || '#6366f1'}` : '1px solid #e5e7eb',
+                      background: active ? (cfg?.bg || '#eef2ff') : '#fff',
+                      color: active ? (cfg?.color || '#6366f1') : '#6b7280',
+                    }}>
+                      {s === 'all' ? 'All' : cfg?.label}
+                    </button>
+                  );
+                })}
+                <span style={{ width: 1, background: '#e5e7eb', margin: '0 4px' }} />
+                <button onClick={() => setShowInactive(!showInactive)} style={{
+                  padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  border: showInactive ? `1px solid ${STATUS_CONFIG.inactive.color}` : '1px solid #e5e7eb',
+                  background: showInactive ? STATUS_CONFIG.inactive.bg : '#fff',
+                  color: showInactive ? STATUS_CONFIG.inactive.color : '#6b7280',
+                }}>
+                  Inactive ({counts.inactive})
+                </button>
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>Sort:</span>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+                  style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 10px', fontSize: 12, outline: 'none' }}>
+                  <option value="overdue">Most Overdue</option>
+                  <option value="churn">Highest Churn Risk</option>
+                  <option value="name">Name A–Z</option>
+                  <option value="value">Highest Revenue</option>
+                  <option value="orders">Most Orders</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: churn risk filters */}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', paddingTop: 4, borderTop: '1px solid #f3f4f6' }}>
+              <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 4 }}>Churn Risk:</span>
+              {['all', 'Low', 'Medium', 'High'].map((r) => {
+                const active = filterChurnRisk === r;
+                const cfg = CHURN_COLORS[r];
                 return (
-                  <button key={s} onClick={() => setFilterStatus(s)} style={{
-                    padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  <button key={r} onClick={() => setFilterChurnRisk(r)} style={{
+                    padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     border: active ? `1px solid ${cfg?.color || '#6366f1'}` : '1px solid #e5e7eb',
                     background: active ? (cfg?.bg || '#eef2ff') : '#fff',
                     color: active ? (cfg?.color || '#6366f1') : '#6b7280',
                   }}>
-                    {s === 'all' ? 'All' : cfg?.label}
+                    {r === 'all' ? 'All Risk' : r}
                   </button>
                 );
               })}
-              <span style={{ width: 1, background: '#e5e7eb', margin: '0 4px' }} />
-              <button onClick={() => setShowInactive(!showInactive)} style={{
-                padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                border: showInactive ? `1px solid ${STATUS_CONFIG.inactive.color}` : '1px solid #e5e7eb',
-                background: showInactive ? STATUS_CONFIG.inactive.bg : '#fff',
-                color: showInactive ? STATUS_CONFIG.inactive.color : '#6b7280',
-              }}>
-                Inactive ({counts.inactive})
-              </button>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, color: '#9ca3af' }}>Sort:</span>
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 10px', fontSize: 12, outline: 'none' }}>
-                <option value="overdue">Most Overdue</option>
-                <option value="name">Name A–Z</option>
-                <option value="value">Highest Revenue</option>
-                <option value="orders">Most Orders</option>
-              </select>
             </div>
           </div>
         )}
@@ -315,7 +404,7 @@ export default function App() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                      {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
+                      {['Status', 'Churn Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
                         <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                           {h}
                         </th>
@@ -359,7 +448,7 @@ export default function App() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                        {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
+                        {['Status', 'Churn Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
                           <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                             {h}
                           </th>
