@@ -23,7 +23,7 @@ export function processOrders(salesOrders) {
   salesOrders.forEach((order) => {
     const id = order.customer_id;
     const name = order.customer_name;
-    const date = new Date(order.date);
+    const date = new Date(order.date + 'T00:00:00');
     const value = parseFloat(order.total) || 0;
     const items = (order.line_items || []).map((li) => li.name || li.item_name || 'Unknown');
     const qty = parseFloat(order.quantity) || 0;
