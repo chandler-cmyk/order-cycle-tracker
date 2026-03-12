@@ -59,7 +59,12 @@ function CustomerRow({ customer, index }) {
         }}
       >
         <td style={td}><StatusBadge status={customer.cycleStatus} /></td>
-        <td style={{ ...td, fontWeight: 600, color: '#111827' }}>{customer.name}</td>
+        <td style={{ ...td, fontWeight: 600, color: '#111827' }}>
+          {customer.name}
+          {customer.viaCustomer && (
+            <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400, marginTop: 2 }}>via {customer.viaCustomer}</div>
+          )}
+        </td>
         <td style={td}>{customer.orderCount}</td>
         <td style={td}>{customer.lastOrderDate ? fmtDate(customer.lastOrderDate) : '—'}</td>
         <td style={td}>{customer.avgCadenceDays ? `Every ${customer.avgCadenceDays}d` : '—'}</td>
