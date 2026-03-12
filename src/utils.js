@@ -26,11 +26,12 @@ export function processOrders(salesOrders) {
     const date = new Date(order.date);
     const value = parseFloat(order.total) || 0;
     const items = (order.line_items || []).map((li) => li.name || li.item_name || 'Unknown');
+    const qty = (order.line_items || []).reduce((sum, li) => sum + (parseFloat(li.quantity) || 0), 0);
 
     if (!customerMap[id]) {
       customerMap[id] = { id, name, orders: [], totalValue: 0, skus: new Set() };
     }
-    customerMap[id].orders.push({ date, value, items, status: order.order_status });
+    customerMap[id].orders.push({ date, value, qty, items, status: order.order_status });
     customerMap[id].totalValue += value;
     items.forEach((i) => customerMap[id].skus.add(i));
   });
@@ -71,11 +72,20 @@ export function processOrders(salesOrders) {
       else cycleStatus = 'on_track';
     }
 
+    const last3 = sorted.slice(-3);
+    const estOrderValue = last3.length > 0
+      ? Math.round(last3.reduce((s, o) => s + o.value, 0) / last3.length * 100) / 100
+      : null;
+    const estOrderQty = last3.length > 0
+      ? Math.round(last3.reduce((s, o) => s + o.qty, 0) / last3.length)
+      : null;
+
     return {
       id: c.id, name: c.name, orderCount: sorted.length, lastOrderDate,
       avgCadenceDays, nextExpected, daysOverdue, daysUntilNext,
       daysSinceLastOrder, totalValue: c.totalValue, skus: Array.from(c.skus),
       lastOrderStatus: lastOrder?.status || '', cycleStatus,
+      estOrderValue, estOrderQty,
     };
   });
 }

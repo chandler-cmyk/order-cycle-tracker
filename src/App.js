@@ -73,11 +73,13 @@ function CustomerRow({ customer, index }) {
             : <span style={{ color: '#9ca3af' }}>—</span>}
         </td>
         <td style={td}>{fmtCurrency(customer.totalValue)}</td>
+        <td style={td}>{customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : <span style={{ color: '#9ca3af' }}>—</span>}</td>
+        <td style={td}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : <span style={{ color: '#9ca3af' }}>—</span>}</td>
         <td style={{ ...td, color: '#9ca3af', fontSize: 10 }}>{expanded ? '▲' : '▼'}</td>
       </tr>
       {expanded && (
         <tr style={{ background: '#f8faff' }}>
-          <td colSpan={8} style={{ padding: '14px 24px 18px' }}>
+          <td colSpan={10} style={{ padding: '14px 24px 18px' }}>
             <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap' }}>
               <div>
                 <div style={dlabel}>Next Expected Order</div>
@@ -86,6 +88,14 @@ function CustomerRow({ customer, index }) {
               <div>
                 <div style={dlabel}>Avg Order Cadence</div>
                 <div style={dval}>{customer.avgCadenceDays ? `${customer.avgCadenceDays} days` : '—'}</div>
+              </div>
+              <div>
+                <div style={dlabel}>Est. Order Value</div>
+                <div style={dval}>{customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : '—'}</div>
+              </div>
+              <div>
+                <div style={dlabel}>Est. Order Qty</div>
+                <div style={dval}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : '—'}</div>
               </div>
               <div>
                 <div style={dlabel}>SKUs / Flavors Ordered</div>
@@ -300,7 +310,7 @@ export default function App() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                      {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', ''].map((h) => (
+                      {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
                         <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                           {h}
                         </th>
@@ -344,7 +354,7 @@ export default function App() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                        {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', ''].map((h) => (
+                        {['Status', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
                           <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                             {h}
                           </th>
