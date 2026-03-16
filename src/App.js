@@ -1,68 +1,100 @@
 import { useState, useEffect, useCallback } from 'react';
 import { STATUS_CONFIG, INACTIVE_DAYS, fmtDate, fmtCurrency, processOrders } from './utils';
 
-// ─── Shared Styles ────────────────────────────────────────────────────────────
-const td = {
-  padding: '12px 16px', fontSize: 13, color: '#374151',
-  borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap',
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const C = {
+  bg:       '#f8fafc',
+  surface:  '#ffffff',
+  border:   '#e2e8f0',
+  borderSub:'#f1f5f9',
+  text:     '#0f172a',
+  textSub:  '#475569',
+  textMute: '#94a3b8',
+  accent:   '#6366f1',
 };
-const dlabel = {
-  fontSize: 11, color: '#9ca3af', fontWeight: 600,
-  textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4,
-};
-const dval = { fontSize: 13, color: '#111827', fontWeight: 500 };
 
 const CHURN_COLORS = {
-  Low:    { color: '#10b981', bg: '#f0fdf4', border: '#bbf7d0' },
-  Medium: { color: '#f59e0b', bg: '#fffbeb', border: '#fde68a' },
-  High:   { color: '#ef4444', bg: '#fef2f2', border: '#fecaca' },
+  Low:    { color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+  Medium: { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+  High:   { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+};
+
+// ─── Shared cell style ────────────────────────────────────────────────────────
+const td = {
+  padding: '11px 14px', fontSize: 13, color: C.textSub,
+  borderBottom: `1px solid ${C.borderSub}`, whiteSpace: 'nowrap',
+};
+const th = {
+  padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+  color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em',
+  whiteSpace: 'nowrap', background: C.bg, borderBottom: `1px solid ${C.border}`,
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, accent }) {
+function StatCard({ label, value, sub, color }) {
   return (
     <div style={{
-      background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
-      padding: '20px 24px', borderLeft: `4px solid ${accent}`,
+      background: C.surface, borderRadius: 10,
+      border: `1px solid ${C.border}`,
+      padding: '16px 20px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     }}>
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 30, fontWeight: 800, color: '#111827', fontFamily: "'Syne', sans-serif" }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{sub}</div>}
+      <div style={{ fontSize: 11, color: C.textMute, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: color || C.text, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: C.textMute, marginTop: 6 }}>{sub}</div>}
     </div>
+  );
+}
+
+function Badge({ label, color, bg, border }) {
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 9px', borderRadius: 6,
+      fontSize: 11, fontWeight: 600, color, background: bg,
+      border: `1px solid ${border}`, letterSpacing: '0.02em',
+    }}>
+      {label}
+    </span>
   );
 }
 
 function StatusBadge({ status }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.on_track;
-  return (
-    <span style={{
-      display: 'inline-block', padding: '3px 10px', borderRadius: 20,
-      fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg,
-      border: `1px solid ${cfg.border}`, letterSpacing: '0.03em',
-    }}>
-      {cfg.label}
-    </span>
-  );
+  return <Badge label={cfg.label} color={cfg.color} bg={cfg.bg} border={cfg.border} />;
 }
 
 function ChurnRiskBadge({ risk }) {
-  const cfg = CHURN_COLORS[risk] || { color: '#9ca3af', bg: '#f9fafb', border: '#d1d5db' };
+  const cfg = CHURN_COLORS[risk] || { color: C.textMute, bg: C.borderSub, border: C.border };
+  return <Badge label={risk} color={cfg.color} bg={cfg.bg} border={cfg.border} />;
+}
+
+function FilterBtn({ active, color, bg, border, onClick, children }) {
   return (
-    <span style={{
-      display: 'inline-block', padding: '3px 10px', borderRadius: 20,
-      fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg,
-      border: `1px solid ${cfg.border}`, letterSpacing: '0.03em',
+    <button onClick={onClick} style={{
+      padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+      cursor: 'pointer', transition: 'all 0.1s',
+      border: `1px solid ${active ? (border || C.accent) : C.border}`,
+      background: active ? (bg || '#eef2ff') : C.surface,
+      color: active ? (color || C.accent) : C.textSub,
     }}>
-      {risk}
-    </span>
+      {children}
+    </button>
   );
 }
 
-function CustomerRow({ customer, index }) {
+function DetailItem({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: C.textMute, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{value}</div>
+    </div>
+  );
+}
+
+function CustomerRow({ customer }) {
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
   const cfg = STATUS_CONFIG[customer.cycleStatus];
-  const base = index % 2 === 0 ? '#fafafa' : '#fff';
 
   return (
     <>
@@ -72,105 +104,89 @@ function CustomerRow({ customer, index }) {
         onMouseLeave={() => setHovered(false)}
         style={{
           cursor: 'pointer',
-          background: hovered ? '#f0f9ff' : base,
-          borderLeft: `3px solid ${expanded ? cfg.color : 'transparent'}`,
-          transition: 'background 0.12s',
+          background: expanded ? '#f8faff' : hovered ? '#f8fafc' : C.surface,
+          borderLeft: `2px solid ${expanded ? cfg.color : 'transparent'}`,
+          transition: 'background 0.1s',
         }}
       >
         <td style={td}><StatusBadge status={customer.cycleStatus} /></td>
         <td style={td}><ChurnRiskBadge risk={customer.churnRisk} /></td>
-        <td style={{ ...td, fontWeight: 600, color: '#111827' }}>
+        <td style={{ ...td, color: C.text, fontWeight: 600 }}>
           {customer.name}
           {customer.viaCustomer && (
-            <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400, marginTop: 2 }}>via {customer.viaCustomer}</div>
+            <div style={{ fontSize: 11, color: C.textMute, fontWeight: 400, marginTop: 1 }}>via {customer.viaCustomer}</div>
           )}
         </td>
-        <td style={td}>{customer.orderCount}</td>
-        <td style={td}>{customer.lastOrderDate ? fmtDate(customer.lastOrderDate) : '—'}</td>
-        <td style={td}>{customer.avgCadenceDays ? `Every ${customer.avgCadenceDays}d` : '—'}</td>
+        <td style={{ ...td, color: C.textSub }}>{customer.orderCount}</td>
+        <td style={td}>{customer.lastOrderDate ? fmtDate(customer.lastOrderDate) : <span style={{ color: C.textMute }}>—</span>}</td>
+        <td style={td}>{customer.avgCadenceDays ? `${customer.avgCadenceDays}d` : <span style={{ color: C.textMute }}>—</span>}</td>
         <td style={td}>
           {customer.cycleStatus === 'inactive'
-            ? <span style={{ color: '#6b7280' }}>{customer.daysSinceLastOrder}d ago</span>
+            ? <span style={{ color: C.textMute }}>{customer.daysSinceLastOrder}d ago</span>
             : customer.daysOverdue != null
-            ? <span style={{ color: '#ef4444', fontWeight: 700 }}>{customer.daysOverdue}d overdue</span>
+            ? <span style={{ color: '#dc2626', fontWeight: 700 }}>{customer.daysOverdue}d overdue</span>
             : customer.daysUntilNext != null
-            ? <span style={{ color: '#10b981', fontWeight: 600 }}>In {customer.daysUntilNext}d</span>
-            : <span style={{ color: '#9ca3af' }}>—</span>}
+            ? <span style={{ color: '#059669', fontWeight: 600 }}>in {customer.daysUntilNext}d</span>
+            : <span style={{ color: C.textMute }}>—</span>}
         </td>
-        <td style={td}>{fmtCurrency(customer.totalValue)}</td>
-        <td style={td}>{customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : <span style={{ color: '#9ca3af' }}>—</span>}</td>
-        <td style={td}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : <span style={{ color: '#9ca3af' }}>—</span>}</td>
-        <td style={{ ...td, color: '#9ca3af', fontSize: 10 }}>{expanded ? '▲' : '▼'}</td>
+        <td style={{ ...td, color: C.text, fontWeight: 500 }}>{fmtCurrency(customer.totalValue)}</td>
+        <td style={td}>{customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : <span style={{ color: C.textMute }}>—</span>}</td>
+        <td style={td}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : <span style={{ color: C.textMute }}>—</span>}</td>
+        <td style={{ ...td, color: C.textMute, fontSize: 11, textAlign: 'center' }}>{expanded ? '▲' : '▼'}</td>
       </tr>
+
       {expanded && (
-        <tr style={{ background: '#f8faff' }}>
-          <td colSpan={11} style={{ padding: '14px 24px 18px' }}>
-            <div style={{ display: 'flex', gap: 40, flexWrap: 'wrap', marginBottom: 20 }}>
-              <div>
-                <div style={dlabel}>Next Expected Order</div>
-                <div style={dval}>{customer.nextExpected ? fmtDate(customer.nextExpected) : 'Not enough order history'}</div>
-              </div>
-              <div>
-                <div style={dlabel}>Avg Order Cadence</div>
-                <div style={dval}>{customer.avgCadenceDays ? `${customer.avgCadenceDays} days` : '—'}</div>
-              </div>
-              <div>
-                <div style={dlabel}>Est. Order Value</div>
-                <div style={dval}>{customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : '—'}</div>
-              </div>
-              <div>
-                <div style={dlabel}>Est. Order Qty</div>
-                <div style={dval}>{customer.estOrderQty != null ? `${customer.estOrderQty} units` : '—'}</div>
-              </div>
-              <div>
-                <div style={dlabel}>Churn Risk Score</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <ChurnRiskBadge risk={customer.churnRisk} />
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>{customer.churnScore}/100</span>
+        <tr>
+          <td colSpan={11} style={{ padding: 0, borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ background: '#f8faff', borderTop: `1px solid ${C.border}`, padding: '16px 20px' }}>
+
+              {/* Summary stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 16, marginBottom: 20 }}>
+                <DetailItem label="Next Expected" value={customer.nextExpected ? fmtDate(customer.nextExpected) : 'Not enough history'} />
+                <DetailItem label="Avg Cadence" value={customer.avgCadenceDays ? `Every ${customer.avgCadenceDays} days` : '—'} />
+                <DetailItem label="Est. Order Value" value={customer.estOrderValue != null ? fmtCurrency(customer.estOrderValue) : '—'} />
+                <DetailItem label="Est. Order Qty" value={customer.estOrderQty != null ? `${customer.estOrderQty} units` : '—'} />
+                <DetailItem label="Lifetime Revenue" value={`${fmtCurrency(customer.totalValue)} · ${customer.orderCount} orders`} />
+                <div>
+                  <div style={{ fontSize: 10, color: C.textMute, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Churn Risk</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <ChurnRiskBadge risk={customer.churnRisk} />
+                    <span style={{ fontSize: 11, color: C.textMute }}>{customer.churnScore}/100</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div style={dlabel}>Total Lifetime Value</div>
-                <div style={dval}>{customer.orderCount} orders · {fmtCurrency(customer.totalValue)}</div>
-              </div>
-            </div>
 
-            {/* Per-SKU Breakdown */}
-            <div>
-              <div style={dlabel}>SKU / Flavor Breakdown</div>
+              {/* SKU table */}
+              <div style={{ fontSize: 10, color: C.textMute, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                SKU / Flavor Breakdown
+              </div>
               {customer.skus.length === 0 ? (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No SKU data — line items not available from Zoho list API</span>
+                <div style={{ color: C.textMute, fontSize: 12, padding: '10px 0' }}>No SKU data available</div>
               ) : (
-                <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                <div style={{ overflowX: 'auto', borderRadius: 8, border: `1px solid ${C.border}`, background: C.surface }}>
                   <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f1f5f9' }}>
-                        {['SKU / Flavor', 'Last Order', 'Avg Cadence', 'Next Expected', 'Status', 'Avg Qty (last 3)'].map((h) => (
-                          <th key={h} style={{
-                            padding: '7px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700,
-                            color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em',
-                            borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap',
-                          }}>
-                            {h}
-                          </th>
+                      <tr>
+                        {['SKU / Flavor', 'Last Order', 'Cadence', 'Next Expected', 'Status', 'Avg Qty'].map((h) => (
+                          <th key={h} style={th}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {customer.skus.map((sku) => (
-                        <tr key={sku.name} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '7px 12px', fontWeight: 600, color: '#111827' }}>{sku.name}</td>
-                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.lastOrderDate ? fmtDate(sku.lastOrderDate) : '—'}</td>
-                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.avgCadenceDays ? `${sku.avgCadenceDays}d` : '—'}</td>
-                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.nextExpected ? fmtDate(sku.nextExpected) : '—'}</td>
-                          <td style={{ padding: '7px 12px' }}>
+                      {customer.skus.map((sku, i) => (
+                        <tr key={sku.name} style={{ background: i % 2 === 0 ? C.surface : C.bg }}>
+                          <td style={{ ...td, fontWeight: 600, color: C.text, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>{sku.name}</td>
+                          <td style={{ ...td, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>{sku.lastOrderDate ? fmtDate(sku.lastOrderDate) : '—'}</td>
+                          <td style={{ ...td, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>{sku.avgCadenceDays ? `${sku.avgCadenceDays}d` : '—'}</td>
+                          <td style={{ ...td, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>{sku.nextExpected ? fmtDate(sku.nextExpected) : '—'}</td>
+                          <td style={{ ...td, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>
                             {sku.daysOverdue != null
-                              ? <span style={{ color: '#ef4444', fontWeight: 700 }}>{sku.daysOverdue}d overdue</span>
+                              ? <span style={{ color: '#dc2626', fontWeight: 700 }}>{sku.daysOverdue}d overdue</span>
                               : sku.daysUntilNext != null
-                              ? <span style={{ color: '#10b981', fontWeight: 600 }}>In {sku.daysUntilNext}d</span>
+                              ? <span style={{ color: '#059669', fontWeight: 600 }}>in {sku.daysUntilNext}d</span>
                               : <StatusBadge status={sku.cycleStatus} />}
                           </td>
-                          <td style={{ padding: '7px 12px', color: '#374151' }}>{sku.avgQty != null ? `${sku.avgQty} units` : '—'}</td>
+                          <td style={{ ...td, borderBottom: i === customer.skus.length - 1 ? 'none' : undefined }}>{sku.avgQty != null ? `${sku.avgQty} units` : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -202,15 +218,14 @@ export default function App() {
   const fetchData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
-    setProgress('Connecting to server...');
+    setProgress('Connecting...');
     try {
-      setProgress('Loading orders from Zoho Inventory...');
+      setProgress('Loading orders...');
       const url = forceRefresh ? '/api/orders?refresh=true' : '/api/orders';
       const res = await fetch(url);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Server error: ${res.status}`);
       if (data.error) throw new Error(data.error);
-
       setProgress(`Processing ${data.orders.length} orders...`);
       const processed = processOrders(data.orders);
       setCustomers(processed);
@@ -231,10 +246,10 @@ export default function App() {
 
   const sortFn = (a, b) => {
     if (sortBy === 'overdue') return (b.daysOverdue || -999) - (a.daysOverdue || -999);
-    if (sortBy === 'name') return a.name.localeCompare(b.name);
-    if (sortBy === 'value') return b.totalValue - a.totalValue;
-    if (sortBy === 'orders') return b.orderCount - a.orderCount;
-    if (sortBy === 'churn') return b.churnScore - a.churnScore;
+    if (sortBy === 'name')    return a.name.localeCompare(b.name);
+    if (sortBy === 'value')   return b.totalValue - a.totalValue;
+    if (sortBy === 'orders')  return b.orderCount - a.orderCount;
+    if (sortBy === 'churn')   return b.churnScore - a.churnScore;
     return 0;
   };
 
@@ -261,29 +276,35 @@ export default function App() {
   };
   const totalRevenue = customers.reduce((s, c) => s + c.totalValue, 0);
 
+  const TABLE_HEADERS = ['Status', 'Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', 'Est. Value', 'Est. Qty', ''];
+
   return (
-    <div style={{ minHeight: '100vh', background: '#f1f5f9' }}>
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
 
       {/* Header */}
-      <div style={{ background: '#0f172a', padding: '22px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
-            📦 Order Cycle Tracker
-          </div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>
-            {lastRefresh
-              ? `${fromCache ? '📋 Cached data · ' : '🔄 Live data · '}Last synced ${lastRefresh.toLocaleTimeString()}`
-              : 'Connecting...'}
-          </div>
+      <div style={{ background: '#0f172a', padding: '0 32px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>
+            Order Cycle Tracker
+          </span>
+          {lastRefresh && (
+            <span style={{ fontSize: 11, color: '#475569' }}>
+              {fromCache ? 'Cached' : 'Live'} · {lastRefresh.toLocaleTimeString()}
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => fetchData(false)} disabled={loading}
-            style={{ background: '#1e293b', color: '#94a3b8', border: '1px solid #334155', borderRadius: 8, padding: '8px 16px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => fetchData(false)} disabled={loading} style={{
+            background: 'transparent', color: '#64748b', border: '1px solid #1e293b',
+            borderRadius: 6, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 500,
+          }}>
             Use Cache
           </button>
-          <button onClick={() => fetchData(true)} disabled={loading}
-            style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
-            {loading ? 'Loading...' : '↻ Refresh Live'}
+          <button onClick={() => fetchData(true)} disabled={loading} style={{
+            background: '#3b82f6', color: '#fff', border: 'none',
+            borderRadius: 6, padding: '6px 16px', fontSize: 12, cursor: 'pointer', fontWeight: 600,
+          }}>
+            {loading ? 'Loading...' : '↻ Refresh'}
           </button>
         </div>
       </div>
@@ -292,76 +313,80 @@ export default function App() {
 
         {/* Error */}
         {error && (
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '14px 18px', marginBottom: 20, color: '#dc2626', fontSize: 13 }}>
-            <strong>⚠ Error:</strong> {error}
-            <div style={{ marginTop: 6, color: '#9ca3af', fontSize: 12 }}>
-              Make sure the backend server is running: open a terminal in VS Code and run <code>node server.js</code>
-            </div>
+          <div style={{ background: '#fef2f2', border: `1px solid #fecaca`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 13 }}>
+            <strong>Error:</strong> {error}
           </div>
         )}
 
         {/* Loading */}
         {loading && (
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '48px 32px', textAlign: 'center', marginBottom: 20 }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>⏳</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#374151' }}>{progress || 'Loading...'}</div>
-            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Token refresh is automatic — no action needed</div>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '52px 32px', textAlign: 'center' }}>
+            <div style={{ width: 32, height: 32, border: '3px solid #e2e8f0', borderTopColor: '#6366f1', borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.textSub }}>{progress || 'Loading...'}</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
 
         {/* Stat Cards */}
         {!loading && customers.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 16, marginBottom: 24 }}>
-            <StatCard label="Total Customers" value={customers.length} sub={`${fmtCurrency(totalRevenue)} total revenue`} accent="#6366f1" />
-            <StatCard label="Overdue" value={counts.overdue} sub="Past reorder date" accent="#ef4444" />
-            <StatCard label="Due This Week" value={counts.due_soon} sub="Reorder within 7 days" accent="#f59e0b" />
-            <StatCard label="On Track" value={counts.on_track} sub="No action needed" accent="#10b981" />
-            <StatCard label="New Customers" value={counts.new_customer} sub="Not enough history yet" accent="#6366f1" />
-            <StatCard label="Inactive" value={counts.inactive} sub={`No orders in ${INACTIVE_DAYS}+ days`} accent="#6b7280" />
-            <StatCard label="High Risk" value={counts.highRisk} sub="High churn probability" accent="#ef4444" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: 12, marginBottom: 20 }}>
+            <StatCard label="Customers" value={customers.length} sub={fmtCurrency(totalRevenue)} color={C.accent} />
+            <StatCard label="Overdue" value={counts.overdue} sub="Past reorder date" color="#dc2626" />
+            <StatCard label="Due This Week" value={counts.due_soon} sub="Within 7 days" color="#d97706" />
+            <StatCard label="On Track" value={counts.on_track} sub="No action needed" color="#059669" />
+            <StatCard label="New" value={counts.new_customer} sub="Insufficient history" color={C.accent} />
+            <StatCard label="Inactive" value={counts.inactive} sub={`${INACTIVE_DAYS}+ days`} color={C.textMute} />
+            <StatCard label="High Risk" value={counts.highRisk} sub="Churn risk" color="#dc2626" />
           </div>
         )}
 
         {/* Filters */}
         {!loading && customers.length > 0 && (
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 18px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Row 1: search + status filters + inactive toggle + sort */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {/* Search */}
               <input
                 placeholder="Search customer…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '7px 14px', fontSize: 13, outline: 'none', width: 200 }}
+                style={{
+                  border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px',
+                  fontSize: 13, outline: 'none', width: 190, color: C.text, background: C.bg,
+                }}
               />
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+
+              {/* Status filters */}
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {['all', 'overdue', 'due_soon', 'on_track', 'new_customer'].map((s) => {
                   const cfg = STATUS_CONFIG[s];
-                  const active = filterStatus === s;
                   return (
-                    <button key={s} onClick={() => setFilterStatus(s)} style={{
-                      padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                      border: active ? `1px solid ${cfg?.color || '#6366f1'}` : '1px solid #e5e7eb',
-                      background: active ? (cfg?.bg || '#eef2ff') : '#fff',
-                      color: active ? (cfg?.color || '#6366f1') : '#6b7280',
-                    }}>
+                    <FilterBtn key={s} active={filterStatus === s} color={cfg?.color} bg={cfg?.bg} border={cfg?.color} onClick={() => setFilterStatus(s)}>
                       {s === 'all' ? 'All' : cfg?.label}
-                    </button>
+                    </FilterBtn>
                   );
                 })}
-                <span style={{ width: 1, background: '#e5e7eb', margin: '0 4px' }} />
-                <button onClick={() => setShowInactive(!showInactive)} style={{
-                  padding: '5px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  border: showInactive ? `1px solid ${STATUS_CONFIG.inactive.color}` : '1px solid #e5e7eb',
-                  background: showInactive ? STATUS_CONFIG.inactive.bg : '#fff',
-                  color: showInactive ? STATUS_CONFIG.inactive.color : '#6b7280',
-                }}>
-                  Inactive ({counts.inactive})
-                </button>
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, color: '#9ca3af' }}>Sort:</span>
-                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                  style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 10px', fontSize: 12, outline: 'none' }}>
+
+              <div style={{ width: 1, height: 20, background: C.border, margin: '0 2px' }} />
+
+              {/* Inactive toggle */}
+              <FilterBtn
+                active={showInactive}
+                color={STATUS_CONFIG.inactive.color}
+                bg={STATUS_CONFIG.inactive.bg}
+                border={STATUS_CONFIG.inactive.color}
+                onClick={() => setShowInactive(!showInactive)}
+              >
+                Inactive ({counts.inactive})
+              </FilterBtn>
+
+              {/* Sort */}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ fontSize: 11, color: C.textMute, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sort</span>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{
+                  border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px',
+                  fontSize: 12, outline: 'none', color: C.textSub, background: C.surface, cursor: 'pointer',
+                }}>
                   <option value="overdue">Most Overdue</option>
                   <option value="churn">Highest Churn Risk</option>
                   <option value="name">Name A–Z</option>
@@ -371,21 +396,15 @@ export default function App() {
               </div>
             </div>
 
-            {/* Row 2: churn risk filters */}
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', paddingTop: 4, borderTop: '1px solid #f3f4f6' }}>
-              <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 4 }}>Churn Risk:</span>
+            {/* Churn risk row */}
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', paddingTop: 8, borderTop: `1px solid ${C.borderSub}` }}>
+              <span style={{ fontSize: 11, color: C.textMute, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Churn</span>
               {['all', 'Low', 'Medium', 'High'].map((r) => {
-                const active = filterChurnRisk === r;
                 const cfg = CHURN_COLORS[r];
                 return (
-                  <button key={r} onClick={() => setFilterChurnRisk(r)} style={{
-                    padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    border: active ? `1px solid ${cfg?.color || '#6366f1'}` : '1px solid #e5e7eb',
-                    background: active ? (cfg?.bg || '#eef2ff') : '#fff',
-                    color: active ? (cfg?.color || '#6366f1') : '#6b7280',
-                  }}>
-                    {r === 'all' ? 'All Risk' : r}
-                  </button>
+                  <FilterBtn key={r} active={filterChurnRisk === r} color={cfg?.color} bg={cfg?.bg} border={cfg?.color} onClick={() => setFilterChurnRisk(r)}>
+                    {r === 'all' ? 'All' : r}
+                  </FilterBtn>
                 );
               })}
             </div>
@@ -394,21 +413,17 @@ export default function App() {
 
         {/* Table */}
         {!loading && customers.length > 0 && (
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             {filtered.length === 0 ? (
-              <div style={{ padding: 60, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
-                No customers match your current filters.
+              <div style={{ padding: 48, textAlign: 'center', color: C.textMute, fontSize: 13 }}>
+                No customers match your filters.
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                      {['Status', 'Churn Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Next Order', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
-                        <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                          {h}
-                        </th>
-                      ))}
+                    <tr>
+                      {TABLE_HEADERS.map((h) => <th key={h} style={th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -421,37 +436,33 @@ export default function App() {
         )}
 
         {!loading && customers.length > 0 && (
-          <div style={{ marginTop: 10, fontSize: 11, color: '#9ca3af', textAlign: 'right' }}>
-            Showing {filtered.length} of {activeCustomers.length} active customers · Click any row to expand details
+          <div style={{ marginTop: 8, fontSize: 11, color: C.textMute, textAlign: 'right' }}>
+            {filtered.length} of {activeCustomers.length} active customers · click a row to expand
           </div>
         )}
 
-        {/* Inactive Customers Section */}
+        {/* Inactive section */}
         {!loading && showInactive && (
-          <div style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700, color: '#374151' }}>
-                Inactive Customers
-              </div>
-              <span style={{ background: '#f3f4f6', color: '#6b7280', borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 600 }}>
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.textSub }}>Inactive Customers</span>
+              <span style={{ background: C.borderSub, color: C.textMute, borderRadius: 20, padding: '1px 9px', fontSize: 11, fontWeight: 600 }}>
                 {filteredInactive.length}
               </span>
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>No orders in {INACTIVE_DAYS}+ days</div>
+              <span style={{ fontSize: 11, color: C.textMute }}>No orders in {INACTIVE_DAYS}+ days</span>
             </div>
             {filteredInactive.length === 0 ? (
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '32px', textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 32, textAlign: 'center', color: C.textMute, fontSize: 13 }}>
                 No inactive customers match your search.
               </div>
             ) : (
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', opacity: 0.85 }}>
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', opacity: 0.85, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                        {['Status', 'Churn Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', 'Est. Order Value', 'Est. Qty', ''].map((h) => (
-                          <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                            {h}
-                          </th>
+                      <tr>
+                        {['Status', 'Risk', 'Customer', 'Orders', 'Last Order', 'Cadence', 'Last Ordered', 'Revenue', 'Est. Value', 'Est. Qty', ''].map((h) => (
+                          <th key={h} style={th}>{h}</th>
                         ))}
                       </tr>
                     </thead>
