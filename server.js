@@ -99,6 +99,12 @@ async function fetchAllOrders(token) {
   let page = 1;
   let hasMore = true;
 
+  // Only fetch last 18 months — enough for cycle tracking and churn scoring,
+  // while dramatically reducing page count and enrichment scope.
+  const fromDate = new Date();
+  fromDate.setMonth(fromDate.getMonth() - 18);
+  const fromDateStr = fromDate.toISOString().slice(0, 10); // YYYY-MM-DD
+
   while (hasMore && page <= 15) {
     const url = new URL('https://www.zohoapis.com/inventory/v1/salesorders');
     url.searchParams.set('organization_id', ZOHO_ORG_ID);
@@ -106,6 +112,7 @@ async function fetchAllOrders(token) {
     url.searchParams.set('page', page);
     url.searchParams.set('sort_column', 'date');
     url.searchParams.set('sort_order', 'D');
+    url.searchParams.set('date_after', fromDateStr);
 
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
@@ -123,10 +130,10 @@ async function fetchAllOrders(token) {
   return allOrders;
 }
 
-// Fetch line_items only for the 3 most recent orders per customer —
+// Fetch line_items only for the most recent orders per customer —
 // that's all we need for per-SKU tracking and churn signals.
 async function enrichOrdersWithLineItems(orders, token) {
-  const BATCH_SIZE = 20;
+  const BATCH_SIZE = 40;
 
   // Group order indices by customer, sorted newest-first
   const byCustomer = {};
@@ -166,7 +173,7 @@ async function enrichOrdersWithLineItems(orders, token) {
   const enriched = [...orders];
   let successCount = 0;
   let failCount = 0;
-  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (top 5/customer + sub-customer orders, ${BATCH_SIZE} at a time)...`);
+  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (top 5/customer + sub-customer orders, batch ${BATCH_SIZE}, 75ms delay)...`);
 
   for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
     const batch = toEnrich.slice(i, i + BATCH_SIZE);
@@ -198,7 +205,7 @@ async function enrichOrdersWithLineItems(orders, token) {
     }));
     // Small delay between batches to avoid Zoho rate limits
     if (i + BATCH_SIZE < toEnrich.length) {
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 75));
     }
   }
 
@@ -234,7 +241,7 @@ app.get('/api/orders', async (req, res) => {
     }
 
     const token = await getAccessToken();
-    console.log('🌐 Fetching fresh orders from Zoho...');
+    console.log('🌐 Fetching fresh orders from Zoho (last 18 months)...');
     const orders = await fetchAllOrders(token);
     const enriched = await enrichOrdersWithLineItems(orders, token);
     cachedOrders = enriched;
