@@ -304,6 +304,22 @@ export function processOrders(salesOrders) {
     }
   });
 
+  // Debug: log sub-customer enrichment state
+  const subEntries = Object.values(subCustomerMap);
+  const subOrdersWithSkus = subEntries.reduce((s, c) => s + (Object.keys(c.skuMap).length > 0 ? 1 : 0), 0);
+  console.log(
+    `[debug] Sub-customers: ${subEntries.length} found, ${subOrdersWithSkus}/${subEntries.length} have SKU data`,
+    subEntries.map((c) => ({
+      name: c.name,
+      orders: c.orders.length,
+      skus: Object.keys(c.skuMap).length,
+      ordersWithLineItems: salesOrders.filter((o) => {
+        const ref = (o.reference_number || '').toLowerCase();
+        return ref.includes(c.name.toLowerCase()) && o.line_items && o.line_items.length > 0;
+      }).length,
+    }))
+  );
+
   const regularCustomers = Object.values(customerMap).map(buildCustomerStats);
   const subCustomers = Object.values(subCustomerMap).map(buildCustomerStats);
   return [...regularCustomers, ...subCustomers];

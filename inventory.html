@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finished Goods Inventory</title>
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: #1a2b4a;
+      color: #fff;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    header h1 {
+      font-size: 1.55rem;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    header h1 span {
+      font-size: 0.85rem;
+      font-weight: 400;
+      opacity: 0.65;
+      margin-left: 10px;
+    }
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #last-updated {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 8px 16px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #btn-refresh {
+      background: #378ADD;
+      color: #fff;
+    }
+    #btn-refresh:hover:not(:disabled) { background: #2a6db5; }
+    #btn-csv {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    #btn-csv:hover:not(:disabled) { background: rgba(255,255,255,0.25); }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 24px 60px;
+    }
+
+    /* ── Loading ─────────────────────────────────────────────────────── */
+    #loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 100px 0;
+      color: #5a6a80;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 5px solid #d0d8e8;
+      border-top-color: #378ADD;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { font-size: 1rem; }
+
+    /* ── Error ───────────────────────────────────────────────────────── */
+    #error-box {
+      background: #fff0f0;
+      border: 1px solid #f5c6c6;
+      border-radius: 10px;
+      padding: 24px;
+      color: #a00;
+      display: none;
+    }
+    #error-box h3 { margin-bottom: 8px; }
+
+    /* ── Summary bar ─────────────────────────────────────────────────── */
+    #summary {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: #1a2b4a;
+      color: #fff;
+      border-radius: 10px;
+      padding: 18px 28px;
+      min-width: 180px;
+      flex: 1;
+    }
+    .stat-card .stat-value {
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+      color: #5eb3ff;
+    }
+    .stat-card .stat-label {
+      font-size: 0.78rem;
+      opacity: 0.7;
+      margin-top: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Category cards ──────────────────────────────────────────────── */
+    .cat-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .cat-header {
+      background: #1a2b4a;
+      color: #fff;
+      padding: 14px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cat-header h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .cat-subtotal {
+      font-size: 0.85rem;
+      opacity: 0.8;
+    }
+    .cat-subtotal strong { color: #5eb3ff; font-size: 1.05rem; }
+
+    /* ── Item table ──────────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      background: #f0f3f8;
+      color: #5a6a80;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      padding: 10px 22px;
+      text-align: left;
+    }
+    thead th:last-child { text-align: right; }
+    tbody tr { border-top: 1px solid #eef1f7; transition: background 0.1s; }
+    tbody tr:hover { background: #f8faff; }
+    td {
+      padding: 11px 22px;
+      font-size: 0.9rem;
+    }
+    td:last-child { text-align: right; font-weight: 600; }
+
+    /* ── Low stock highlighting ───────────────────────────────────────── */
+    tr.low-amber td { background: #fffbea; }
+    tr.low-amber td:last-child { color: #b45309; }
+    tr.low-red td { background: #fff2f2; }
+    tr.low-red td:last-child { color: #b91c1c; }
+    .low-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 12px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .low-badge.amber { background: #fde68a; color: #92400e; }
+    .low-badge.red   { background: #fecaca; color: #991b1b; }
+
+    /* ── Strain badges ───────────────────────────────────────────────── */
+    .strain {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .strain-sativa  { background: #d1fae5; color: #065f46; }
+    .strain-indica  { background: #ede9fe; color: #4c1d95; }
+    .strain-hybrid  { background: #fef9c3; color: #713f12; }
+    .strain-unknown { background: #e5e7eb; color: #4b5563; }
+
+    /* ── Empty category ──────────────────────────────────────────────── */
+    .cat-empty {
+      padding: 18px 22px;
+      color: #9aa5b8;
+      font-size: 0.88rem;
+      font-style: italic;
+    }
+
+    /* ── Zero stock section ──────────────────────────────────────────── */
+    #zero-stock-section {
+      margin-top: 28px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      overflow: hidden;
+    }
+    #zero-stock-section summary {
+      padding: 14px 22px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #5a6a80;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    #zero-stock-section summary::before {
+      content: '▶';
+      font-size: 0.65rem;
+      transition: transform 0.2s;
+    }
+    #zero-stock-section[open] summary::before { transform: rotate(90deg); }
+    #zero-stock-section summary:hover { background: #f8faff; }
+    .zero-stock-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 8px;
+      padding: 12px 22px 20px;
+      border-top: 1px solid #eef1f7;
+    }
+    .zero-chip {
+      background: #f4f6f9;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+    }
+    .zero-chip .zero-flavor { font-weight: 600; color: #1a1a2e; }
+    .zero-chip .zero-cat { font-size: 0.7rem; color: #9aa5b8; margin-top: 2px; }
+
+    /* ── Content wrapper ─────────────────────────────────────────────── */
+    #content { display: none; }
+
+    /* ── Print styles ────────────────────────────────────────────────── */
+    @media print {
+      header { background: #1a2b4a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      #btn-refresh, #btn-csv, #zero-stock-section summary { display: none; }
+      body { background: #fff; }
+      .cat-card, #zero-stock-section { box-shadow: none; border: 1px solid #ddd; }
+      #zero-stock-section { display: block; }
+      #zero-stock-section summary { display: none; }
+      .zero-stock-grid { border-top: 1px solid #ddd; }
+      tr.low-amber td { background: #fffbea !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      tr.low-red td   { background: #fff2f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .cat-header { background: #1a2b4a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Finished Goods Inventory <span>— NYSW</span></h1>
+  <div class="header-controls">
+    <span id="last-updated">Loading…</span>
+    <button id="btn-csv" onclick="downloadCSV()" disabled>⬇ Download CSV</button>
+    <button id="btn-refresh" onclick="loadInventory(true)">↻ Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div id="loading">
+    <div class="spinner"></div>
+    <p>Fetching inventory from Zoho…</p>
+  </div>
+
+  <div id="error-box">
+    <h3>Failed to load inventory</h3>
+    <p id="error-msg"></p>
+  </div>
+
+  <div id="content">
+    <div id="summary"></div>
+    <div id="categories"></div>
+    <details id="zero-stock-section">
+      <summary id="zero-stock-label">Zero Stock Items (0)</summary>
+      <div class="zero-stock-grid" id="zero-stock-list"></div>
+    </details>
+  </div>
+</main>
+
+<script>
+  const CATEGORIES = [
+    'THCA Prerolls',
+    'THCA Blunts',
+    'THCA Mini Prerolls',
+    'LUNCHBOXX Prerolls',
+    'LUNCHBOXX Hash Hole Prerolls',
+  ];
+
+  let currentData = null; // for CSV export
+
+  function strainBadge(strain) {
+    if (!strain) return '<span class="strain strain-unknown">—</span>';
+    const cls = strain.toLowerCase();
+    return `<span class="strain strain-${cls}">${strain}</span>`;
+  }
+
+  function lowBadge(qty) {
+    if (qty < 20) return '<span class="low-badge red">LOW</span>';
+    if (qty < 50) return '<span class="low-badge amber">LOW</span>';
+    return '';
+  }
+
+  function rowClass(qty) {
+    if (qty < 20) return ' class="low-red"';
+    if (qty < 50) return ' class="low-amber"';
+    return '';
+  }
+
+  function fmtTimestamp(ts) {
+    const d = new Date(ts);
+    return d.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+  }
+
+  function renderSummary(data, cachedAt) {
+    let grand = 0;
+    const catTotals = [];
+    for (const cat of CATEGORIES) {
+      const items = data[cat] || [];
+      const total = items.reduce((s, i) => s + i.quantity, 0);
+      grand += total;
+      catTotals.push({ cat, total });
+    }
+
+    const el = document.getElementById('summary');
+    let html = `<div class="stat-card">
+      <div class="stat-value">${grand.toLocaleString()}</div>
+      <div class="stat-label">Total Units Available</div>
+    </div>`;
+
+    for (const { cat, total } of catTotals) {
+      html += `<div class="stat-card" style="background:#243860;">
+        <div class="stat-value" style="font-size:1.6rem;">${total.toLocaleString()}</div>
+        <div class="stat-label">${cat}</div>
+      </div>`;
+    }
+
+    el.innerHTML = html;
+  }
+
+  function renderCategories(data) {
+    const container = document.getElementById('categories');
+    container.innerHTML = '';
+    const zeroItems = [];
+
+    for (const cat of CATEGORIES) {
+      const items = data[cat] || [];
+      const inStock = items.filter(i => i.quantity > 0);
+      const zeros   = items.filter(i => i.quantity === 0);
+      zeros.forEach(i => zeroItems.push({ ...i, cat }));
+
+      const subtotal = inStock.reduce((s, i) => s + i.quantity, 0);
+
+      let html = `<div class="cat-card">
+        <div class="cat-header">
+          <h2>${cat}</h2>
+          <div class="cat-subtotal">Subtotal: <strong>${subtotal.toLocaleString()}</strong> units</div>
+        </div>`;
+
+      if (inStock.length === 0) {
+        html += `<div class="cat-empty">No stock available in this category.</div>`;
+      } else {
+        html += `<table>
+          <thead><tr>
+            <th>Flavor</th>
+            <th>Strain</th>
+            <th>Qty Available</th>
+          </tr></thead>
+          <tbody>`;
+        for (const item of inStock) {
+          html += `<tr${rowClass(item.quantity)}>
+            <td>${escHtml(item.flavor)}${lowBadge(item.quantity)}</td>
+            <td>${strainBadge(item.strain)}</td>
+            <td>${item.quantity.toLocaleString()}</td>
+          </tr>`;
+        }
+        html += `</tbody></table>`;
+      }
+
+      html += `</div>`;
+      container.insertAdjacentHTML('beforeend', html);
+    }
+
+    // Zero stock section
+    const zeroLabel = document.getElementById('zero-stock-label');
+    const zeroList  = document.getElementById('zero-stock-list');
+    zeroLabel.textContent = `Zero Stock Items (${zeroItems.length})`;
+
+    if (zeroItems.length === 0) {
+      zeroList.innerHTML = '<p style="padding:12px 0;color:#9aa5b8;font-style:italic;">No zero-stock items.</p>';
+    } else {
+      zeroList.innerHTML = zeroItems.map(i => `
+        <div class="zero-chip">
+          <div class="zero-flavor">${escHtml(i.flavor)}</div>
+          <div class="zero-cat">${escHtml(i.cat)}</div>
+        </div>`).join('');
+    }
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function setLoading(yes) {
+    document.getElementById('loading').style.display  = yes ? 'flex' : 'none';
+    document.getElementById('content').style.display  = yes ? 'none' : 'block';
+    document.getElementById('btn-refresh').disabled   = yes;
+    document.getElementById('btn-csv').disabled       = yes;
+  }
+
+  function showError(msg) {
+    document.getElementById('loading').style.display  = 'none';
+    document.getElementById('content').style.display  = 'none';
+    const box = document.getElementById('error-box');
+    box.style.display = 'block';
+    document.getElementById('error-msg').textContent = msg;
+  }
+
+  async function loadInventory(forceRefresh = false) {
+    setLoading(true);
+    document.getElementById('error-box').style.display = 'none';
+    document.getElementById('last-updated').textContent = 'Loading…';
+
+    try {
+      const url = '/api/inventory' + (forceRefresh ? '?refresh=true' : '');
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      currentData = json;
+
+      renderSummary(json.data, json.cachedAt);
+      renderCategories(json.data);
+
+      const tsLabel = fmtTimestamp(json.cachedAt);
+      const cacheNote = json.cached ? ' (cached)' : ' (live)';
+      document.getElementById('last-updated').textContent = `Updated ${tsLabel}${cacheNote}`;
+
+      setLoading(false);
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  function downloadCSV() {
+    if (!currentData) return;
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const rows = [['Category', 'Flavor', 'Strain Type', 'Quantity Available', 'Last Updated']];
+    const ts = fmtTimestamp(currentData.cachedAt);
+
+    for (const cat of CATEGORIES) {
+      const items = currentData.data[cat] || [];
+      for (const item of items) {
+        rows.push([
+          csvCell(cat),
+          csvCell(item.flavor),
+          csvCell(item.strain || ''),
+          item.quantity,
+          csvCell(ts),
+        ]);
+      }
+    }
+
+    const csv = rows.map(r => r.join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `finished-goods-${dateStr}.csv`;
+    a.click();
+  }
+
+  function csvCell(val) {
+    const s = String(val);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  // Auto-load on page open
+  loadInventory();
+</script>
+</body>
+</html>

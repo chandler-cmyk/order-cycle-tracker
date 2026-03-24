@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -13,7 +14,12 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "server": "node server.js",
+    "dashboard:server": "node dashboard-server.js",
+    "dashboard:client": "cd dashboard-client && npm start",
+    "dashboard:build": "cd dashboard-client && npm install && npm run build",
+    "inventory": "node inventory-server.js"
   },
   "browserslist": {
     "production": [

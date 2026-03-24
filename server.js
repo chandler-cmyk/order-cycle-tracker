@@ -130,10 +130,24 @@ async function fetchAllOrders(token) {
   return allOrders;
 }
 
+// Fetch a single order detail, retrying on 429 with exponential backoff.
+async function fetchOrderDetail(salesorderId, token, retries = 4) {
+  const url = `https://www.zohoapis.com/inventory/v1/salesorders/${salesorderId}?organization_id=${ZOHO_ORG_ID}`;
+  const headers = { Authorization: `Zoho-oauthtoken ${token}` };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, { headers });
+    if (res.status !== 429) return res;
+    const wait = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s, 8s
+    console.warn(`  ⏳ 429 on ${salesorderId}, waiting ${wait}ms (attempt ${attempt + 1}/${retries})...`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  return null; // exhausted retries
+}
+
 // Fetch line_items only for the most recent orders per customer —
 // that's all we need for per-SKU tracking and churn signals.
 async function enrichOrdersWithLineItems(orders, token) {
-  const BATCH_SIZE = 40;
+  const BATCH_SIZE = 20;
 
   // Group order indices by customer, sorted newest-first
   const byCustomer = {};
@@ -173,15 +187,19 @@ async function enrichOrdersWithLineItems(orders, token) {
   const enriched = [...orders];
   let successCount = 0;
   let failCount = 0;
-  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (top 5/customer + sub-customer orders, batch ${BATCH_SIZE}, 75ms delay)...`);
+  console.log(`🔍 Fetching line items for ${toEnrich.length} orders (batch ${BATCH_SIZE}, 200ms delay, 429-retry enabled)...`);
 
   for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
     const batch = toEnrich.slice(i, i + BATCH_SIZE);
     await Promise.all(batch.map(async (orderIdx) => {
       const order = enriched[orderIdx];
       try {
-        const url = `https://www.zohoapis.com/inventory/v1/salesorders/${order.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
-        const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+        const res = await fetchOrderDetail(order.salesorder_id, token);
+        if (!res) {
+          console.warn(`  ❌ Order ${order.salesorder_id} exhausted retries (429)`);
+          failCount++;
+          return;
+        }
         if (!res.ok) {
           console.warn(`  ⚠️ Order ${order.salesorder_id} returned ${res.status}`);
           failCount++;
@@ -203,9 +221,9 @@ async function enrichOrdersWithLineItems(orders, token) {
         failCount++;
       }
     }));
-    // Small delay between batches to avoid Zoho rate limits
+    // Delay between batches to stay within Zoho rate limits
     if (i + BATCH_SIZE < toEnrich.length) {
-      await new Promise((r) => setTimeout(r, 75));
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
