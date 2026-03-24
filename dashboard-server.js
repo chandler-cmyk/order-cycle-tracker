@@ -549,5 +549,5 @@ app.listen(PORT, () => {
 
 // SPA fallback — serve index.html for any non-API route
 if (require('fs').existsSync(CLIENT_BUILD)) {
-  app.get('*', (_req, res) => res.sendFile(path.join(CLIENT_BUILD, 'index.html')));
+  app.get('/{*splat}', (_req, res) => res.sendFile(path.join(CLIENT_BUILD, 'index.html')));
 }
