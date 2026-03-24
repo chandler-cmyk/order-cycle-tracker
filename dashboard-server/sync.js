@@ -508,12 +508,15 @@ async function startSync() {
     console.log(`  ✅ Invoice sync complete: ${processed} saved, ${skipped} skipped, ${failed} failed`);
 
     // ── Phase 3: sync credit notes (always full scan; skip-if-current handles dedup) ─
+    // Re-fetch token in case invoice sync took long enough to expire it (Zoho tokens last ~1hr)
     console.log(`\n🔄 Syncing credit notes...`);
-    await syncCreditNotes(token, null);
+    const cnToken = await getAccessToken();
+    await syncCreditNotes(cnToken, null);
 
     // ── Phase 4: sync sales returns (always full scan) ────────────────────────
     console.log(`\n🔄 Syncing sales returns...`);
-    await syncSalesReturns(token);
+    const srToken = await getAccessToken();
+    await syncSalesReturns(srToken);
 
     // ── Phase 5: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
