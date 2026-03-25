@@ -13,9 +13,6 @@ const NAME_CORRECTIONS = {
   'Orangle Slushie': 'Orange Slushie',
 };
 
-function correctItemName(name) {
-  return NAME_CORRECTIONS[name] || name;
-}
 
 // ── One-time migration: re-derive brand/category from item names ───────────────
 // Runs on every startup — idempotent and fast (pure SQLite, no API calls).
@@ -84,21 +81,12 @@ function buildWhereClause(query) {
   const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft')`];
   const cnParams = [s, e];
 
-  // Sales return side — exclude void/cancelled
-  const srCond   = [`sr.date BETWEEN ? AND ?`, `sr.status NOT IN ('void','cancelled')`];
-  const srParams = [s, e];
-  // Sales return side with invoice-date attribution (mirrors CN methodology)
-  const srCond2   = [`COALESCE(ref_sr_inv.date, sr.date) BETWEEN ? AND ?`, `sr.status NOT IN ('void','cancelled')`];
-  const srParams2 = [s, e];
-
   if (brands) {
     const list = brands.split(',').filter(Boolean);
     if (list.length) {
       const ph = list.map(() => '?').join(',');
       invCond.push(`li.brand IN (${ph})`);    invParams.push(...list);
       cnCond.push(`cni.brand IN (${ph})`);    cnParams.push(...list);
-      srCond.push(`sri.brand IN (${ph})`);    srParams.push(...list);
-      srCond2.push(`sri.brand IN (${ph})`);   srParams2.push(...list);
     }
   }
   if (categories) {
@@ -107,26 +95,18 @@ function buildWhereClause(query) {
       const ph = list.map(() => '?').join(',');
       invCond.push(`li.category IN (${ph})`);    invParams.push(...list);
       cnCond.push(`cni.category IN (${ph})`);    cnParams.push(...list);
-      srCond.push(`sri.category IN (${ph})`);    srParams.push(...list);
-      srCond2.push(`sri.category IN (${ph})`);   srParams2.push(...list);
     }
   }
   if (sku) {
     invCond.push(`(li.sku LIKE ? OR li.name LIKE ?)`);    invParams.push(`%${sku}%`, `%${sku}%`);
     cnCond.push(`(cni.sku LIKE ? OR cni.name LIKE ?)`);   cnParams.push(`%${sku}%`, `%${sku}%`);
-    srCond.push(`(sri.sku LIKE ? OR sri.name LIKE ?)`);   srParams.push(`%${sku}%`, `%${sku}%`);
-    srCond2.push(`(sri.sku LIKE ? OR sri.name LIKE ?)`);  srParams2.push(`%${sku}%`, `%${sku}%`);
   }
 
   return {
-    where:    invCond.join(' AND '),
-    params:   invParams,
-    cnWhere:  cnCond.join(' AND '),
+    where:   invCond.join(' AND '),
+    params:  invParams,
+    cnWhere: cnCond.join(' AND '),
     cnParams,
-    srWhere:  srCond.join(' AND '),
-    srParams,
-    srWhere2: srCond2.join(' AND '),
-    srParams2,
   };
 }
 
