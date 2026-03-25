@@ -23,19 +23,6 @@ function migrateLineItemBrandCategory() {
     db.prepare(`UPDATE credit_note_items  SET name = REPLACE(name, ?, ?) WHERE name LIKE ?`).run(wrong, right, `%${wrong}%`);
     db.prepare(`UPDATE sales_return_items SET name = REPLACE(name, ?, ?) WHERE name LIKE ?`).run(wrong, right, `%${wrong}%`);
   }
-  // Force re-sync of any sales returns missing invoice_id so we get correct date attribution
-  const nullSRInvoiceIds = db.prepare(`SELECT COUNT(*) as c FROM sales_returns WHERE invoice_id IS NULL OR invoice_id = ''`).get()?.c || 0;
-  if (nullSRInvoiceIds > 0) {
-    db.prepare(`UPDATE sales_returns SET last_modified_time = '' WHERE invoice_id IS NULL OR invoice_id = ''`).run();
-    console.log(`🔄 Cleared last_modified_time for ${nullSRInvoiceIds} sales returns missing invoice_id — will re-fetch from Zoho`);
-  }
-
-  // Force re-sync of any credit notes that are missing invoice_id so we get correct date attribution
-  const nullInvoiceIdCNs = db.prepare(`SELECT COUNT(*) as c FROM credit_notes WHERE invoice_id IS NULL OR invoice_id = ''`).get()?.c || 0;
-  if (nullInvoiceIdCNs > 0) {
-    db.prepare(`UPDATE credit_notes SET last_modified_time = '' WHERE invoice_id IS NULL OR invoice_id = ''`).run();
-    console.log(`🔄 Cleared last_modified_time for ${nullInvoiceIdCNs} credit notes missing invoice_id — will re-fetch from Zoho`);
-  }
 
   const updateLI  = db.prepare(`UPDATE line_items          SET brand = ?, category = ? WHERE id = ?`);
   const updateCNI = db.prepare(`UPDATE credit_note_items   SET brand = ?, category = ? WHERE id = ?`);

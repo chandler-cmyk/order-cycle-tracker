@@ -5,7 +5,7 @@ const { inferBrandCategory } = require('./categorize');
 
 const { ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID } = process.env;
 const BASE = 'https://www.zohoapis.com/inventory/v1';
-const REQUEST_DELAY_MS = 700; // 700ms between each sequential detail fetch → ~85 req/min
+const REQUEST_DELAY_MS = 300; // 300ms between requests → ~200 req/min, well within Zoho limits
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const syncState = {
@@ -507,16 +507,16 @@ async function startSync() {
 
     console.log(`  ✅ Invoice sync complete: ${processed} saved, ${skipped} skipped, ${failed} failed`);
 
-    // ── Phase 3: sync credit notes (always full scan; skip-if-current handles dedup) ─
+    // ── Phase 3: sync credit notes (delta filter; skip-if-current handles dedup) ─
     // Re-fetch token in case invoice sync took long enough to expire it (Zoho tokens last ~1hr)
     console.log(`\n🔄 Syncing credit notes...`);
     const cnToken = await getAccessToken();
-    await syncCreditNotes(cnToken, null);
+    await syncCreditNotes(cnToken, deltaFilter);
 
-    // ── Phase 4: sync sales returns (always full scan) ────────────────────────
+    // ── Phase 4: sync sales returns (delta filter) ────────────────────────────
     console.log(`\n🔄 Syncing sales returns...`);
     const srToken = await getAccessToken();
-    await syncSalesReturns(srToken);
+    await syncSalesReturns(srToken, deltaFilter);
 
     // ── Phase 5: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
