@@ -297,7 +297,7 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { if (authed) fetchData(); }, [fetchData, authed]);
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 

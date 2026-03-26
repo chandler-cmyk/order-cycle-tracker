@@ -462,11 +462,12 @@ export default function App() {
 
   // ── Filter options (brands/categories) ──────────────────────────────────────
   useEffect(() => {
+    if (!authed) return;
     fetch('/api/dashboard/filters')
       .then(r => r.json())
       .then(d => setFilterOptions(d))
       .catch(() => {});
-  }, []);
+  }, [authed]);
 
   // ── Sync status polling ──────────────────────────────────────────────────────
   const pollSync = useCallback(() => {
@@ -482,9 +483,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!authed) return;
     pollSync();
     return () => clearTimeout(syncPollRef.current);
-  }, [pollSync]);
+  }, [pollSync, authed]);
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
