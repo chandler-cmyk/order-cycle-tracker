@@ -201,8 +201,66 @@ function CustomerRow({ customer }) {
   );
 }
 
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        localStorage.setItem('auth_token', data.token);
+        onLogin();
+      } else {
+        setError('Incorrect password');
+      }
+    } catch {
+      setError('Connection error');
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: '40px 48px', width: 360, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.text, marginBottom: 6 }}>Order Cycle Tracker</div>
+        <div style={{ fontSize: 13, color: C.textMute, marginBottom: 28 }}>Enter your password to continue</div>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Password"
+            autoFocus
+            style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: `1px solid ${error ? '#fca5a5' : C.border}`, borderRadius: 8, outline: 'none', marginBottom: 8, boxSizing: 'border-box', background: C.bg, color: C.text }}
+          />
+          {error && <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 8 }}>{error}</div>}
+          <button
+            type="submit"
+            disabled={loading || !password}
+            style={{ width: '100%', padding: '10px', fontSize: 14, fontWeight: 600, background: C.accent, color: '#fff', border: 'none', borderRadius: 8, cursor: loading || !password ? 'not-allowed' : 'pointer', opacity: loading || !password ? 0.6 : 1 }}
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [authed, setAuthed] = useState(!!localStorage.getItem('auth_token'));
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -240,6 +298,8 @@ export default function App() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
   const activeCustomers = customers.filter((c) => c.cycleStatus !== 'inactive');
   const inactiveCustomers = customers.filter((c) => c.cycleStatus === 'inactive');

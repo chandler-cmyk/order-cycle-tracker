@@ -56,7 +56,25 @@ const {
   ZOHO_CLIENT_SECRET,
   ZOHO_REFRESH_TOKEN,
   ZOHO_ORG_ID,
+  SITE_PASSWORD,
 } = process.env;
+
+app.post('/api/login', (req, res) => {
+  if (!SITE_PASSWORD) return res.json({ ok: true, token: 'open' });
+  const { password } = req.body;
+  if (password === SITE_PASSWORD) {
+    res.json({ ok: true, token: SITE_PASSWORD });
+  } else {
+    res.status(401).json({ ok: false, error: 'Incorrect password' });
+  }
+});
+
+app.use('/api', (req, res, next) => {
+  if (!SITE_PASSWORD) return next();
+  const auth = req.headers.authorization;
+  if (auth === `Bearer ${SITE_PASSWORD}`) return next();
+  res.status(401).json({ error: 'Unauthorized' });
+});
 
 let cachedToken = null;
 let tokenExpiry = null;

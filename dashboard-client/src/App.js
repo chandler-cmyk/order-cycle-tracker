@@ -386,8 +386,66 @@ function StateProductPanel({ state, dateRange, filters }) {
   );
 }
 
+// ── Login Screen ───────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        localStorage.setItem('auth_token', data.token);
+        onLogin();
+      } else {
+        setError('Incorrect password');
+      }
+    } catch {
+      setError('Connection error');
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '40px 48px', width: 360, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>Sales Dashboard</div>
+        <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 28 }}>Enter your password to continue</div>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Password"
+            autoFocus
+            style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: `1px solid ${error ? '#fca5a5' : '#e2e8f0'}`, borderRadius: 8, outline: 'none', marginBottom: 8, boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a' }}
+          />
+          {error && <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 8 }}>{error}</div>}
+          <button
+            type="submit"
+            disabled={loading || !password}
+            style={{ width: '100%', padding: '10px', fontSize: 14, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: loading || !password ? 'not-allowed' : 'pointer', opacity: loading || !password ? 0.6 : 1 }}
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────────
 export default function App() {
+  const [authed, setAuthed] = useState(!!localStorage.getItem('auth_token'));
   const [activeView, setActiveView] = useState('overview');
   const [dateRange, setDateRange]   = useState(() => {
     const r = getPresetRange('30D');
@@ -427,6 +485,8 @@ export default function App() {
     pollSync();
     return () => clearTimeout(syncPollRef.current);
   }, [pollSync]);
+
+  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
   const triggerSync = () => {
     fetch('/api/sync', { method: 'POST' })

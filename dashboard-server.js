@@ -43,9 +43,27 @@ const BRANDS = ['LunchBoxx', "Not Ya Son's Weed"];
 
 const app  = express();
 const PORT = process.env.PORT || process.env.DASHBOARD_PORT || 3002;
+const SITE_PASSWORD = process.env.SITE_PASSWORD;
 
 app.use(cors());
 app.use(express.json());
+
+app.post('/api/login', (req, res) => {
+  if (!SITE_PASSWORD) return res.json({ ok: true, token: 'open' });
+  const { password } = req.body;
+  if (password === SITE_PASSWORD) {
+    res.json({ ok: true, token: SITE_PASSWORD });
+  } else {
+    res.status(401).json({ ok: false, error: 'Incorrect password' });
+  }
+});
+
+app.use('/api', (req, res, next) => {
+  if (!SITE_PASSWORD) return next();
+  const auth = req.headers.authorization;
+  if (auth === `Bearer ${SITE_PASSWORD}`) return next();
+  res.status(401).json({ error: 'Unauthorized' });
+});
 
 // Serve React build in production
 const CLIENT_BUILD = path.join(__dirname, 'dashboard-client', 'build');
