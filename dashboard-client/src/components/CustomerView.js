@@ -3,7 +3,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip,
 } from 'recharts';
-import { C, fmtCurrency, fmtNumber, fmtDate, buildQuery } from '../utils';
+import { C, fmtCurrency, fmtNumber, fmtDate, buildQuery, exportToCsv } from '../utils';
 
 const th = {
   padding: '9px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
@@ -268,15 +268,33 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Customer Revenue</div>
           {!loading && <div style={{ fontSize: 12, color: C.textMute, marginTop: 2 }}>{customers.length} customers — click any row to drill in</div>}
         </div>
-        <input
-          placeholder="Search customers…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{
-            border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px',
-            fontSize: 12, outline: 'none', color: C.text, background: C.bg, width: 200,
-          }}
-        />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!loading && customers.length > 0 && (
+            <button
+              onClick={() => exportToCsv(
+                'customers.csv',
+                ['Customer Name', 'Invoices', 'Revenue'],
+                customers.map(c => [c.customer_name, c.orderCount, c.revenue?.toFixed(2)])
+              )}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', border: `1px solid ${C.border}`,
+                background: C.surface, color: C.textSub, whiteSpace: 'nowrap',
+              }}
+            >
+              ↓ Export CSV
+            </button>
+          )}
+          <input
+            placeholder="Search customers…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px',
+              fontSize: 12, outline: 'none', color: C.text, background: C.bg, width: 200,
+            }}
+          />
+        </div>
       </div>
 
       {loading ? (

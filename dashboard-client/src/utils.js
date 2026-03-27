@@ -73,6 +73,27 @@ export function getPresetRange(preset) {
   return { start: fmt(today), end };
 }
 
+export function exportToCsv(filename, headers, rows) {
+  const escape = v => {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    headers.map(escape).join(','),
+    ...rows.map(row => row.map(escape).join(',')),
+  ];
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function buildQuery(dateRange, filters) {
   const p = new URLSearchParams();
   if (dateRange.start) p.set('start', dateRange.start);

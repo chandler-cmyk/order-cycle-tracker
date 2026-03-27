@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { C, fmtCurrency, fmtNumber, fmtPct } from '../utils';
+import { C, fmtCurrency, fmtNumber, fmtPct, exportToCsv } from '../utils';
 
 const th = {
   padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
@@ -42,6 +42,22 @@ export default function ProductTable({ data, loading, onSortChange, sort, order,
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Product Breakdown</div>
           {!loading && <div style={{ fontSize: 12, color: C.textMute, marginTop: 2 }}>{total.toLocaleString()} products</div>}
         </div>
+        {!loading && items.length > 0 && (
+          <button
+            onClick={() => exportToCsv(
+              'products.csv',
+              ['SKU', 'Product Name', 'Brand', 'Category', 'Units Sold', 'Revenue', '% of Total'],
+              items.map(r => [r.sku, r.name, r.brand, r.category, r.units, r.revenue?.toFixed(2), r.pctOfTotal?.toFixed(2)])
+            )}
+            style={{
+              padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', border: `1px solid ${C.border}`,
+              background: C.surface, color: C.textSub,
+            }}
+          >
+            ↓ Export CSV
+          </button>
+        )}
       </div>
 
       {loading ? (

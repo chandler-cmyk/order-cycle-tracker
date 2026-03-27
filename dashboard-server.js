@@ -183,35 +183,71 @@ app.get('/api/dashboard/filters', (_req, res) => {
 // ── Dashboard: metric cards ────────────────────────────────────────────────────
 
 // GET /api/dashboard/metrics?start=&end=&brands=&categories=&sku=
+function shiftDate(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function getMetrics(w) {
+  const revRow = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS totalRevenue, COALESCE(SUM(qty), 0) AS unitsSold
+    FROM ${revenueUnion(w,
+      'li.item_total AS amount, li.quantity AS qty',
+      '-cni.item_total AS amount, -cni.quantity AS qty'
+    )} rev
+  `).get(unionParams(w));
+  const ordRow = db.prepare(`
+    SELECT COUNT(DISTINCT i.invoice_id) AS orderCount
+    FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+    WHERE ${w.where}
+  `).get(w.params);
+  const orderCount = ordRow.orderCount;
+  return {
+    totalRevenue:  revRow.totalRevenue,
+    orderCount,
+    avgOrderValue: orderCount > 0 ? revRow.totalRevenue / orderCount : 0,
+    unitsSold:     revRow.unitsSold,
+  };
+}
+
 app.get('/api/dashboard/metrics', (req, res) => {
   try {
-    const w = buildWhereClause(req.query);
+    const w    = buildWhereClause(req.query);
+    const curr = getMetrics(w);
 
-    // Revenue and units = invoices minus credit notes (draft CNs excluded by status filter)
-    const revRow = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) AS totalRevenue, COALESCE(SUM(qty), 0) AS unitsSold
-      FROM ${revenueUnion(w,
-        'li.item_total AS amount, li.quantity AS qty',
-        '-cni.item_total AS amount, -cni.quantity AS qty'
-      )} rev
-    `).get(unionParams(w));
+    // Prior-year: shift start and end back 365 days
+    const prevQuery = {
+      ...req.query,
+      start: req.query.start ? shiftDate(req.query.start, -365) : req.query.start,
+      end:   req.query.end   ? shiftDate(req.query.end,   -365) : req.query.end,
+    };
+    const prev = getMetrics(buildWhereClause(prevQuery));
 
-    // Order count is invoice-only (credit notes don't create new orders)
-    const ordRow = db.prepare(`
-      SELECT COUNT(DISTINCT i.invoice_id) AS orderCount
-      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
-      WHERE ${w.where}
-    `).get(w.params);
+    res.json({ ...curr, prev });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    const orderCount = ordRow.orderCount;
-    const avg = orderCount > 0 ? (revRow.totalRevenue / orderCount) : 0;
-
-    res.json({
-      totalRevenue:  revRow.totalRevenue,
-      orderCount,
-      avgOrderValue: avg,
-      unitsSold:     revRow.unitsSold,
-    });
+// GET /api/dashboard/outstanding — always current state, no date filter
+app.get('/api/dashboard/outstanding', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT
+        i.status,
+        COUNT(DISTINCT i.invoice_id)     AS count,
+        COALESCE(SUM(li.item_total), 0)  AS value
+      FROM invoices i
+      JOIN line_items li ON i.invoice_id = li.invoice_id
+      WHERE i.status IN ('sent', 'overdue', 'partially_paid')
+      GROUP BY i.status
+      ORDER BY value DESC
+    `).all();
+    const totalCount = rows.reduce((s, r) => s + r.count, 0);
+    const totalValue = rows.reduce((s, r) => s + r.value, 0);
+    res.json({ rows, totalCount, totalValue });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
