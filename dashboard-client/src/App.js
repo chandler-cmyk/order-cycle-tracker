@@ -582,20 +582,12 @@ export default function App() {
       borderRight: '1px solid #1a2235',
     }}>
       {/* Brand */}
-      <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em',
-            boxShadow: '0 2px 8px rgba(99,102,241,0.4)',
-          }}>N</div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>NYSW</div>
-            <div style={{ fontSize: 9, color: '#475569', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Sales Intelligence</div>
-          </div>
-        </div>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <img
+          src="/logo.png.jpeg"
+          alt="F&W Enterprises LLC"
+          style={{ width: '100%', maxWidth: 160, display: 'block' }}
+        />
       </div>
 
       {/* Nav */}
