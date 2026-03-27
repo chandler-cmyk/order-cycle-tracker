@@ -19,10 +19,11 @@ export default function DateRangePicker({ dateRange, onChange }) {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 11, color: C.textMute, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 2 }}>
-        Period
-      </span>
-      <div style={{ display: 'flex', gap: 3 }}>
+      <div style={{
+        display: 'flex', gap: 2,
+        background: C.bg, border: `1px solid ${C.border}`,
+        borderRadius: 8, padding: 3,
+      }}>
         {PRESETS.map(p => {
           const active = dateRange.preset === p;
           return (
@@ -30,15 +31,16 @@ export default function DateRangePicker({ dateRange, onChange }) {
               key={p}
               onClick={() => selectPreset(p)}
               style={{
-                padding: '5px 11px',
+                padding: '4px 11px',
                 borderRadius: 6,
                 fontSize: 12,
                 fontWeight: active ? 700 : 500,
                 cursor: 'pointer',
-                border: `1px solid ${active ? C.accent : C.border}`,
-                background: active ? C.accentBg : C.surface,
+                border: 'none',
+                background: active ? C.surface : 'transparent',
                 color: active ? C.accent : C.textSub,
-                transition: 'all 0.1s',
+                boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                transition: 'all 0.12s',
               }}
             >
               {p}
@@ -55,7 +57,7 @@ export default function DateRangePicker({ dateRange, onChange }) {
             onChange={e => onChange({ ...dateRange, start: e.target.value, preset: 'Custom' })}
             style={inputStyle}
           />
-          <span style={{ color: C.textMute, fontSize: 12 }}>to</span>
+          <span style={{ color: C.textMute, fontSize: 12 }}>→</span>
           <input
             type="date"
             value={dateRange.end || ''}

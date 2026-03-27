@@ -419,10 +419,33 @@ function LoginScreen({ onLogin }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '40px 48px', width: 360, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>Sales Dashboard</div>
-        <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 28 }}>Enter your password to continue</div>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0c1220 0%, #1a1040 50%, #0c1220 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 16, padding: '44px 48px', width: 400,
+        boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+        animation: 'fadeIn 0.3s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, fontWeight: 800, color: '#fff',
+            boxShadow: '0 4px 12px rgba(99,102,241,0.4)',
+          }}>N</div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>NYSW</div>
+            <div style={{ fontSize: 10, color: '#4b5563', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Sales Intelligence</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', marginBottom: 6, letterSpacing: '-0.02em' }}>Welcome back</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 28 }}>Enter your team password to continue</div>
         <form onSubmit={handleSubmit}>
           <input
             type="password"
@@ -430,15 +453,28 @@ function LoginScreen({ onLogin }) {
             onChange={e => setPassword(e.target.value)}
             placeholder="Password"
             autoFocus
-            style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: `1px solid ${error ? '#fca5a5' : '#e2e8f0'}`, borderRadius: 8, outline: 'none', marginBottom: 8, boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a' }}
+            style={{
+              width: '100%', padding: '11px 14px', fontSize: 14,
+              border: `1px solid ${error ? '#f87171' : 'rgba(255,255,255,0.1)'}`,
+              borderRadius: 8, outline: 'none', marginBottom: error ? 6 : 12,
+              background: 'rgba(255,255,255,0.05)', color: '#f1f5f9',
+              boxSizing: 'border-box',
+            }}
           />
-          {error && <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 8 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 10 }}>{error}</div>}
           <button
             type="submit"
             disabled={loading || !password}
-            style={{ width: '100%', padding: '10px', fontSize: 14, fontWeight: 600, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: loading || !password ? 'not-allowed' : 'pointer', opacity: loading || !password ? 0.6 : 1 }}
+            style={{
+              width: '100%', padding: '11px', fontSize: 14, fontWeight: 600,
+              background: loading || !password ? 'rgba(99,102,241,0.4)' : 'linear-gradient(135deg, #6366f1, #4f46e5)',
+              color: '#fff', border: 'none', borderRadius: 8,
+              cursor: loading || !password ? 'not-allowed' : 'pointer',
+              boxShadow: loading || !password ? 'none' : '0 4px 14px rgba(99,102,241,0.4)',
+              transition: 'all 0.2s', letterSpacing: '0.01em',
+            }}
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'Signing in…' : 'Sign in →'}
           </button>
         </form>
       </div>
@@ -540,18 +576,30 @@ export default function App() {
   // ── Sidebar nav ──────────────────────────────────────────────────────────────
   const sidebar = (
     <div style={{
-      width: 200, flexShrink: 0, background: '#0f172a',
+      width: 220, flexShrink: 0,
+      background: '#0c1220',
       display: 'flex', flexDirection: 'column', minHeight: '100vh',
+      borderRight: '1px solid #1a2235',
     }}>
-      <div style={{ padding: '20px 16px', borderBottom: '1px solid #1e293b' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#f1f5f9', letterSpacing: '-0.01em' }}>
-          Sales Dashboard
-        </div>
-        <div style={{ fontSize: 10, color: '#475569', marginTop: 3, fontWeight: 500 }}>
-          NYSW · Powered by Zoho
+      {/* Brand */}
+      <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em',
+            boxShadow: '0 2px 8px rgba(99,102,241,0.4)',
+          }}>N</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em' }}>NYSW</div>
+            <div style={{ fontSize: 9, color: '#475569', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Sales Intelligence</div>
+          </div>
         </div>
       </div>
-      <nav style={{ flex: 1, padding: '12px 8px' }}>
+
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: '10px 10px' }}>
         {NAV.map(item => {
           const active = activeView === item.id;
           return (
@@ -559,35 +607,58 @@ export default function App() {
               key={item.id}
               onClick={() => setActiveView(item.id)}
               style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                width: '100%', padding: '9px 12px', borderRadius: 7, marginBottom: 2,
-                border: 'none', cursor: 'pointer', textAlign: 'left',
+                display: 'flex', alignItems: 'center', gap: 9,
+                width: '100%', padding: '8px 12px', borderRadius: 8, marginBottom: 1,
+                border: 'none', cursor: 'pointer', textAlign: 'left', position: 'relative',
                 fontSize: 13, fontWeight: active ? 600 : 400,
-                background: active ? '#1e293b' : 'transparent',
-                color: active ? '#f1f5f9' : '#64748b',
-                transition: 'all 0.1s',
+                background: active ? 'rgba(99,102,241,0.12)' : 'transparent',
+                color: active ? '#a5b4fc' : '#6b7280',
+                transition: 'background 0.15s, color 0.15s',
               }}
             >
-              <span style={{ fontSize: 14 }}>{item.icon}</span>
+              {active && (
+                <span style={{
+                  position: 'absolute', left: 0, top: '18%', bottom: '18%',
+                  width: 3, borderRadius: '0 3px 3px 0', background: '#6366f1',
+                }} />
+              )}
+              <span style={{ fontSize: 13 }}>{item.icon}</span>
               {item.label}
             </button>
           );
         })}
       </nav>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ fontSize: 10, color: '#374151', fontWeight: 500, letterSpacing: '0.03em' }}>
+          Powered by Zoho Inventory
+        </div>
+      </div>
     </div>
   );
 
   // ── Header ────────────────────────────────────────────────────────────────────
+  const PAGE_TITLES = {
+    overview:  'Overview',
+    trends:    'Revenue Trends',
+    geography: 'Sales by Region',
+    products:  'Products',
+    customers: 'Customers',
+  };
+
   const header = (
     <div style={{
       background: C.surface, borderBottom: `1px solid ${C.border}`,
-      padding: '12px 24px', display: 'flex', gap: 16,
-      alignItems: 'center', flexWrap: 'wrap',
+      padding: '0 24px', display: 'flex', alignItems: 'center',
+      height: 56, gap: 16, flexShrink: 0,
     }}>
-      <DateRangePicker dateRange={dateRange} onChange={r => { setDateRange(r); setProductPage(1); }} />
-      <div style={{ marginLeft: 'auto' }}>
-        <SyncBar syncStatus={syncStatus} onSync={triggerSync} />
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.text, letterSpacing: '-0.01em', marginRight: 'auto' }}>
+        {PAGE_TITLES[activeView] || 'Dashboard'}
       </div>
+      <DateRangePicker dateRange={dateRange} onChange={r => { setDateRange(r); setProductPage(1); }} />
+      <div style={{ width: 1, height: 20, background: C.border, flexShrink: 0 }} />
+      <SyncBar syncStatus={syncStatus} onSync={triggerSync} />
     </div>
   );
 
@@ -723,12 +794,14 @@ export default function App() {
       </div>
 
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes spin  { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
         * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
     </div>
   );

@@ -29,11 +29,12 @@ function MultiSelect({ label, options, selected, onChange }) {
         onClick={() => setOpen(o => !o)}
         style={{
           display: 'flex', alignItems: 'center', gap: 5,
-          padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+          padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 500,
           cursor: 'pointer', whiteSpace: 'nowrap',
           border: `1px solid ${hasSelection ? C.accent : C.border}`,
-          background: hasSelection ? C.accentBg : C.surface,
+          background: hasSelection ? C.accentBg : C.bg,
           color: hasSelection ? C.accent : C.textSub,
+          transition: 'all 0.12s',
         }}
       >
         {btnLabel}
@@ -50,9 +51,9 @@ function MultiSelect({ label, options, selected, onChange }) {
 
       {open && (
         <div style={{
-          position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
-          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+          position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 6,
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06)',
           minWidth: 180, maxHeight: 260, overflowY: 'auto', padding: '4px 0',
         }}>
           {options.length === 0 && (
@@ -94,8 +95,8 @@ export default function FilterBar({ filterOptions, filters, onChange }) {
 
   return (
     <div style={{
-      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
-      padding: '10px 16px', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center',
+      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+      padding: '10px 16px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     }}>
       <span style={{ fontSize: 11, color: C.textMute, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -125,7 +126,7 @@ export default function FilterBar({ filterOptions, filters, onChange }) {
             border: `1px solid ${filters.sku ? C.accent : C.border}`,
             borderRadius: 6, padding: '6px 28px 6px 10px',
             fontSize: 12, outline: 'none',
-            color: C.text, background: filters.sku ? C.accentBg : C.surface,
+            color: C.text, background: filters.sku ? C.accentBg : C.bg,
             width: 180,
           }}
         />
@@ -146,9 +147,9 @@ export default function FilterBar({ filterOptions, filters, onChange }) {
         <button
           onClick={() => onChange({ brands: [], categories: [], sku: '' })}
           style={{
-            marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, fontSize: 12,
+            marginLeft: 'auto', padding: '4px 11px', borderRadius: 7, fontSize: 12,
             cursor: 'pointer', border: `1px solid ${C.border}`,
-            background: 'transparent', color: C.textMute,
+            background: 'transparent', color: C.textMute, transition: 'all 0.12s',
           }}
         >
           Clear all

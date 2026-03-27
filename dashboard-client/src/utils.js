@@ -1,7 +1,7 @@
 export const C = {
-  accent:     '#378ADD',
-  accentDark: '#1e6abf',
-  accentBg:   '#dbeafe',
+  accent:     '#6366f1',
+  accentDark: '#4f46e5',
+  accentBg:   '#eef2ff',
   bg:         '#f8fafc',
   surface:    '#ffffff',
   border:     '#e2e8f0',
@@ -9,6 +9,9 @@ export const C = {
   text:       '#0f172a',
   textSub:    '#475569',
   textMute:   '#94a3b8',
+  // aliases used in inline components
+  card:       '#ffffff',
+  muted:      '#94a3b8',
 };
 
 export function fmtCurrency(v) {
