@@ -222,13 +222,34 @@ function CustomerDetail({ customer, dateRange, filters, onBack }) {
   );
 }
 
+const SEGMENT_CFG = {
+  new:       { label: 'New',       color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+  returning: { label: 'Returning', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+  at_risk:   { label: 'At Risk',   color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+};
+
+function SegmentBadge({ segment }) {
+  const cfg = SEGMENT_CFG[segment];
+  if (!cfg) return null;
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 7px', borderRadius: 5,
+      fontSize: 10, fontWeight: 700,
+      color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
+    }}>
+      {cfg.label}
+    </span>
+  );
+}
+
 // ── Customer list ──────────────────────────────────────────────────────────────
 export default function CustomerView({ dateRange, filters, filterOptions, onFiltersChange }) {
-  const [customers, setCustomers]   = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState(null);
-  const [selected, setSelected]     = useState(null);
-  const [search, setSearch]         = useState('');
+  const [customers, setCustomers]       = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState(null);
+  const [selected, setSelected]         = useState(null);
+  const [search, setSearch]             = useState('');
+  const [segmentFilter, setSegmentFilter] = useState('all');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -253,9 +274,14 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
     );
   }
 
-  const filtered = customers.filter(c =>
-    !search || c.customer_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  const counts = { all: customers.length, new: 0, returning: 0, at_risk: 0 };
+  customers.forEach(c => { if (counts[c.segment] != null) counts[c.segment]++; });
+
+  const filtered = customers.filter(c => {
+    if (search && !c.customer_name?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (segmentFilter !== 'all' && c.segment !== segmentFilter) return false;
+    return true;
+  });
 
   return (
     <div style={{
@@ -297,6 +323,31 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
         </div>
       </div>
 
+      {/* Segment filter tabs */}
+      {!loading && customers.length > 0 && (
+        <div style={{ padding: '8px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', gap: 6 }}>
+          {[
+            { key: 'all',       label: 'All' },
+            { key: 'new',       label: 'New' },
+            { key: 'returning', label: 'Returning' },
+            { key: 'at_risk',   label: 'At Risk' },
+          ].map(({ key, label }) => {
+            const active = segmentFilter === key;
+            const cfg    = SEGMENT_CFG[key];
+            return (
+              <button key={key} onClick={() => setSegmentFilter(key)} style={{
+                padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                border:     `1px solid ${active ? (cfg?.color || C.accent) : C.border}`,
+                background: active ? (cfg?.bg || C.accentBg) : C.surface,
+                color:      active ? (cfg?.color || C.accent) : C.textMute,
+              }}>
+                {label} <span style={{ opacity: 0.7 }}>({counts[key]})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {loading ? (
         <div style={{ padding: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 28, height: 28, border: `3px solid ${C.border}`, borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -311,6 +362,7 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
             <tr>
               <th style={th}>#</th>
               <th style={th}>Customer</th>
+              <th style={th}>Segment</th>
               <th style={{ ...th, textAlign: 'right' }}>Invoices</th>
               <th style={{ ...th, textAlign: 'right' }}>Revenue</th>
               <th style={th}></th>
@@ -338,6 +390,7 @@ function CustomerRow({ rank, customer, onClick }) {
     >
       <td style={{ ...td, color: C.textMute, width: 40, fontVariantNumeric: 'tabular-nums' }}>{rank}</td>
       <td style={{ ...td, color: C.text, fontWeight: 600 }}>{customer.customer_name || '—'}</td>
+      <td style={td}><SegmentBadge segment={customer.segment} /></td>
       <td style={{ ...td, textAlign: 'right' }}>{fmtNumber(customer.orderCount)}</td>
       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: C.text }}>{fmtCurrency(customer.revenue)}</td>
       <td style={{ ...td, color: C.textMute, fontSize: 11 }}>

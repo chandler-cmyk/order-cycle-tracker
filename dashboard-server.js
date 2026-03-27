@@ -385,13 +385,61 @@ app.get('/api/dashboard/categories', (req, res) => {
   }
 });
 
+// ── Dashboard: brand comparison ────────────────────────────────────────────────
+
+// GET /api/dashboard/brand-comparison?start=&end=&group=daily|weekly
+app.get('/api/dashboard/brand-comparison', (req, res) => {
+  try {
+    const group   = req.query.group === 'weekly' ? 'weekly' : 'daily';
+    const dateFmt = group === 'weekly' ? `strftime('%Y-%W', raw_date)` : `raw_date`;
+    const BRANDS  = ['LunchBoxx', "Not Ya Son's Weed"];
+
+    const result = BRANDS.map(brand => {
+      const w = buildWhereClause({ ...req.query, brands: brand });
+      const summary = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(qty), 0) AS units
+        FROM ${revenueUnion(w,
+          'li.item_total AS amount, li.quantity AS qty',
+          '-cni.item_total AS amount, -cni.quantity AS qty'
+        )} s
+      `).get(unionParams(w));
+      const ordRow = db.prepare(`
+        SELECT COUNT(DISTINCT i.invoice_id) AS orderCount
+        FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+        WHERE ${w.where}
+      `).get(w.params);
+      const trend = db.prepare(`
+        SELECT ${dateFmt} AS period, SUM(amount) AS revenue
+        FROM ${revenueUnion(w,
+          'i.date AS raw_date, li.item_total AS amount',
+          'cn.date AS raw_date, -cni.item_total AS amount'
+        )} t
+        GROUP BY period ORDER BY period ASC
+      `).all(unionParams(w));
+      return { name: brand, revenue: summary.revenue, units: summary.units, orderCount: ordRow.orderCount, trend };
+    });
+
+    // Merge trends into a single array keyed by period for charting
+    const allPeriods = [...new Set(result.flatMap(b => b.trend.map(t => t.period)))].sort();
+    const byBrand    = Object.fromEntries(result.map(b => [b.name, Object.fromEntries(b.trend.map(t => [t.period, t.revenue]))]));
+    const merged     = allPeriods.map(period => ({
+      period,
+      lunchboxx: byBrand['LunchBoxx']?.[period] || 0,
+      nysw:      byBrand["Not Ya Son's Weed"]?.[period] || 0,
+    }));
+
+    res.json({ brands: result, merged, group });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Dashboard: customers ───────────────────────────────────────────────────────
 
 // GET /api/dashboard/customers?start=&end=&brands=&categories=&sku=
 app.get('/api/dashboard/customers', (req, res) => {
   try {
     const w = buildWhereClause(req.query);
-    // Net revenue per customer = invoice sales minus credit notes
     const custUnion = revenueUnion(w,
       'i.customer_id AS cid, i.customer_name AS cname, li.item_total AS amount, i.invoice_id AS inv_id',
       'cn.customer_id AS cid, cn.customer_name AS cname, -cni.item_total AS amount, NULL AS inv_id'
@@ -399,13 +447,32 @@ app.get('/api/dashboard/customers', (req, res) => {
     const rows = db.prepare(`
       SELECT
         cid AS customer_id, cname AS customer_name,
-        COALESCE(SUM(amount), 0)       AS revenue,
-        COUNT(DISTINCT inv_id)         AS orderCount
+        COALESCE(SUM(amount), 0) AS revenue,
+        COUNT(DISTINCT inv_id)   AS orderCount
       FROM ${custUnion} cu
       GROUP BY cid, cname
       ORDER BY revenue DESC
     `).all(unionParams(w));
-    res.json(rows);
+
+    // Segmentation: pull each customer's all-time first/last invoice date
+    const histRows = db.prepare(`
+      SELECT customer_id, MIN(date) AS first_ever, MAX(date) AS last_ever
+      FROM invoices WHERE status NOT IN ('void','draft')
+      GROUP BY customer_id
+    `).all();
+    const hist          = Object.fromEntries(histRows.map(r => [r.customer_id, r]));
+    const periodStart   = req.query.start || '2000-01-01';
+    const atRiskCutoff  = shiftDate(new Date().toISOString().slice(0, 10), -60);
+
+    const segmented = rows.map(r => {
+      const h = hist[r.customer_id] || {};
+      let segment = 'returning';
+      if (h.first_ever && h.first_ever >= periodStart) segment = 'new';
+      if (h.last_ever  && h.last_ever  <= atRiskCutoff) segment = 'at_risk';
+      return { ...r, segment, firstOrderDate: h.first_ever, lastOrderDate: h.last_ever };
+    });
+
+    res.json(segmented);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

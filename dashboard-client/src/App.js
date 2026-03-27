@@ -9,6 +9,7 @@ import ProductTable from './components/ProductTable';
 import CustomerView from './components/CustomerView';
 import TopSkusLeaderboard from './components/TopSkusLeaderboard';
 import OutstandingInvoicesTile from './components/OutstandingInvoicesTile';
+import BrandComparison from './components/BrandComparison';
 
 // ── Nav items ──────────────────────────────────────────────────────────────────
 const NAV = [
@@ -616,6 +617,7 @@ export default function App() {
             <TopStatesTable data={states.data} loading={states.loading} />
           </div>
           <CategoryBreakdown data={categories.data} loading={categories.loading} />
+          <BrandComparison dateRange={dateRange} filters={filters} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             <TopSkusLeaderboard dateRange={dateRange} filters={filters} />
             <OutstandingInvoicesTile />
