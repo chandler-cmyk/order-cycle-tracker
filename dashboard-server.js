@@ -13,6 +13,17 @@ const NAME_CORRECTIONS = {
   'Orangle Slushie': 'Orange Slushie',
 };
 
+// ── Exact name fixes (strain type missing) → merge into strain-typed version ──
+const LBHH = 'LUNCHBOXX - THCA Hash Hole Preroll Box 20 ct';
+const EXACT_NAME_CORRECTIONS = {
+  [`${LBHH} - Berry Pie`]:       [`${LBHH} - Berry Pie - Sativa`],
+  [`${LBHH} - Candy Fumez`]:     [`${LBHH} - Candy Fumez - Indica`],
+  [`${LBHH} - Ice Cream Cake`]:  [`${LBHH} - Ice Cream Cake - Hybrid`],
+  [`${LBHH} - Jelly Donuts`]:    [`${LBHH} - Jelly Donuts - Indica`],
+  [`${LBHH} - Sour Strawberry`]: [`${LBHH} - Sour Strawberry - Sativa`],
+  [`${LBHH} - Sticky Buns`]:     [`${LBHH} - Sticky Buns - Hybrid`],
+};
+
 
 // ── One-time migration: re-derive brand/category from item names ───────────────
 // Runs on every startup — idempotent and fast (pure SQLite, no API calls).
@@ -22,6 +33,13 @@ function migrateLineItemBrandCategory() {
     db.prepare(`UPDATE line_items         SET name = REPLACE(name, ?, ?) WHERE name LIKE ?`).run(wrong, right, `%${wrong}%`);
     db.prepare(`UPDATE credit_note_items  SET name = REPLACE(name, ?, ?) WHERE name LIKE ?`).run(wrong, right, `%${wrong}%`);
     db.prepare(`UPDATE sales_return_items SET name = REPLACE(name, ?, ?) WHERE name LIKE ?`).run(wrong, right, `%${wrong}%`);
+  }
+
+  // Exact name fixes — merge strain-less duplicates into strain-typed canonical names
+  for (const [wrong, [right]] of Object.entries(EXACT_NAME_CORRECTIONS)) {
+    db.prepare(`UPDATE line_items         SET name = ? WHERE name = ?`).run(right, wrong);
+    db.prepare(`UPDATE credit_note_items  SET name = ? WHERE name = ?`).run(right, wrong);
+    db.prepare(`UPDATE sales_return_items SET name = ? WHERE name = ?`).run(right, wrong);
   }
 
   const updateLI  = db.prepare(`UPDATE line_items          SET brand = ?, category = ? WHERE id = ?`);
