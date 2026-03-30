@@ -204,7 +204,7 @@ function getMetrics(w) {
     FROM ${revenueUnion(w,
       'li.item_total AS amount, li.quantity AS qty',
       '-cni.item_total AS amount, -cni.quantity AS qty',
-      '-sri.item_total AS amount, -sri.quantity AS qty'
+      '0 AS amount, -sri.quantity AS qty'
     )} rev
   `).get(unionParams(w));
   const ordRow = db.prepare(`
@@ -279,7 +279,7 @@ app.get('/api/dashboard/trend', (req, res) => {
       FROM ${revenueUnion(w,
         'i.date AS raw_date, li.item_total AS amount, i.invoice_id AS inv_id',
         'cn.date AS raw_date, -cni.item_total AS amount, NULL AS inv_id',
-        'sr.date AS raw_date, -sri.item_total AS amount, NULL AS inv_id'
+        'sr.date AS raw_date, 0 AS amount, NULL AS inv_id'
       )} trend
       GROUP BY period
       ORDER BY period ASC
@@ -328,11 +328,11 @@ app.get('/api/dashboard/products', (req, res) => {
     const pageSize = Math.min(100, parseInt(req.query.pageSize || '25', 10));
     const offset   = (page - 1) * pageSize;
 
-    // Net revenue and units per product — invoices minus credit notes and sales returns
+    // Net revenue and units per product — invoices minus credit notes; units also minus sales returns
     const netUnion = revenueUnion(w,
       'li.sku AS sku, li.name AS name, li.brand AS brand, li.category AS cat, li.item_total AS amount, li.quantity AS qty',
       'cni.sku AS sku, cni.name AS name, cni.brand AS brand, cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
-      'sri.sku AS sku, sri.name AS name, sri.brand AS brand, sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
+      'sri.sku AS sku, sri.name AS name, sri.brand AS brand, sri.category AS cat, 0 AS amount, -sri.quantity AS qty'
     );
 
     const totalRow = db.prepare(`
@@ -376,7 +376,7 @@ app.get('/api/dashboard/categories', (req, res) => {
     const netUnion = revenueUnion(w,
       'li.category AS cat, li.item_total AS amount, li.quantity AS qty',
       'cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
-      'sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
+      'sri.category AS cat, 0 AS amount, -sri.quantity AS qty'
     );
     const rows = db.prepare(`
       SELECT COALESCE(NULLIF(cat,''), 'Uncategorized') AS category,
@@ -413,7 +413,7 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
         FROM ${revenueUnion(w,
           'li.item_total AS amount, li.quantity AS qty',
           '-cni.item_total AS amount, -cni.quantity AS qty',
-          '-sri.item_total AS amount, -sri.quantity AS qty'
+          '0 AS amount, -sri.quantity AS qty'
         )} s
       `).get(unionParams(w));
       const ordRow = db.prepare(`
@@ -426,7 +426,7 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
         FROM ${revenueUnion(w,
           'i.date AS raw_date, li.item_total AS amount',
           'cn.date AS raw_date, -cni.item_total AS amount',
-          'sr.date AS raw_date, -sri.item_total AS amount'
+          'sr.date AS raw_date, 0 AS amount'
         )} t
         GROUP BY period ORDER BY period ASC
       `).all(unionParams(w));
@@ -457,7 +457,7 @@ app.get('/api/dashboard/customers', (req, res) => {
     const custUnion = revenueUnion(w,
       'i.customer_id AS cid, i.customer_name AS cname, li.item_total AS amount, i.invoice_id AS inv_id',
       'cn.customer_id AS cid, cn.customer_name AS cname, -cni.item_total AS amount, NULL AS inv_id',
-      'sr.customer_id AS cid, sr.customer_name AS cname, -sri.item_total AS amount, NULL AS inv_id'
+      'sr.customer_id AS cid, sr.customer_name AS cname, 0 AS amount, NULL AS inv_id'
     );
     const rows = db.prepare(`
       SELECT
@@ -633,7 +633,7 @@ app.get('/api/dashboard/state-products', (req, res) => {
         JOIN invoices ref_inv2 ON ref_inv2.invoice_id = cn.invoice_id
         WHERE ${cnWhere}
         UNION ALL
-        SELECT sri.name, sri.sku, -sri.quantity AS qty, -sri.item_total AS amount
+        SELECT sri.name, sri.sku, -sri.quantity AS qty, 0 AS amount
         FROM sales_returns sr
         JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
         WHERE ${srWhere2}
