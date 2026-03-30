@@ -6,6 +6,7 @@ const CATEGORIES = [
   'LunchBoxx Preroll',
   'Budder Hole Blunt',
   'Budder Hole Preroll',
+  'THCP Preroll',
   'Mini Preroll',
   'Blunt',
   'Preroll',
@@ -29,6 +30,8 @@ function inferBrandCategory(name) {
     category = 'Budder Hole Blunt';
   } else if (/budder.?hole/i.test(n) && /pre.?roll/i.test(n)) {
     category = 'Budder Hole Preroll';
+  } else if (/thcp/i.test(n) && /pre.?roll/i.test(n)) {
+    category = 'THCP Preroll';
   } else if (/mini/i.test(n) && /pre.?roll/i.test(n)) {
     category = 'Mini Preroll';
   } else if (/blunt/i.test(n)) {

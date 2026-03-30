@@ -650,24 +650,6 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
-// ── Diagnostic: preroll items by name ──────────────────────────────────────────
-app.get('/api/debug/prerollnames', (req, res) => {
-  try {
-    const { start, end } = req.query;
-    const s = start || '2000-01-01';
-    const e = end   || '2099-12-31';
-    const rows = db.prepare(`
-      SELECT li.name, SUM(li.quantity) AS qty, COUNT(DISTINCT i.invoice_id) AS invoices
-      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
-      WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft') AND li.category = 'Preroll'
-      GROUP BY li.name ORDER BY qty DESC
-    `).all(s, e);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', port: PORT, syncState });
