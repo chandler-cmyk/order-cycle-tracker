@@ -697,6 +697,27 @@ app.get('/api/debug/units', (req, res) => {
   }
 });
 
+// GET /api/debug/unitsbystatus?start=&end=&category=Preroll
+app.get('/api/debug/unitsbystatus', (req, res) => {
+  try {
+    const { start, end, category } = req.query;
+    const s = start || '2000-01-01';
+    const e = end   || '2099-12-31';
+    const catFilter = category || 'Preroll';
+
+    const rows = db.prepare(`
+      SELECT i.status, SUM(li.quantity) AS qty, COUNT(DISTINCT i.invoice_id) AS invoiceCount
+      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+      WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft') AND li.category = ?
+      GROUP BY i.status ORDER BY qty DESC
+    `).all(s, e, catFilter);
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', port: PORT, syncState });
