@@ -104,12 +104,17 @@ function buildWhereClause(query) {
   const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft')`];
   const cnParams = [s, e];
 
+  // Sales return side — subtract returned units/revenue, same date-window logic.
+  const srCond   = [`sr.date BETWEEN ? AND ?`, `sr.status NOT IN ('void','draft')`];
+  const srParams = [s, e];
+
   if (brands) {
     const list = brands.split(',').filter(Boolean);
     if (list.length) {
       const ph = list.map(() => '?').join(',');
       invCond.push(`li.brand IN (${ph})`);    invParams.push(...list);
       cnCond.push(`cni.brand IN (${ph})`);    cnParams.push(...list);
+      srCond.push(`sri.brand IN (${ph})`);    srParams.push(...list);
     }
   }
   if (categories) {
@@ -118,11 +123,13 @@ function buildWhereClause(query) {
       const ph = list.map(() => '?').join(',');
       invCond.push(`li.category IN (${ph})`);    invParams.push(...list);
       cnCond.push(`cni.category IN (${ph})`);    cnParams.push(...list);
+      srCond.push(`sri.category IN (${ph})`);    srParams.push(...list);
     }
   }
   if (sku) {
     invCond.push(`(li.sku LIKE ? OR li.name LIKE ?)`);    invParams.push(`%${sku}%`, `%${sku}%`);
     cnCond.push(`(cni.sku LIKE ? OR cni.name LIKE ?)`);   cnParams.push(`%${sku}%`, `%${sku}%`);
+    srCond.push(`(sri.sku LIKE ? OR sri.name LIKE ?)`);   srParams.push(`%${sku}%`, `%${sku}%`);
   }
 
   return {
@@ -130,21 +137,22 @@ function buildWhereClause(query) {
     params:  invParams,
     cnWhere: cnCond.join(' AND '),
     cnParams,
+    srWhere: srCond.join(' AND '),
+    srParams,
   };
 }
 
-// Convenience: params for a 2-leg revenue UNION (invoices + CNs)
-function unionParams(w) { return [...w.params, ...w.cnParams]; }
+// Convenience: params for a 3-leg revenue UNION (invoices + CNs + SRs)
+function unionParams(w) { return [...w.params, ...w.cnParams, ...w.srParams]; }
 
-// 2-leg revenue UNION — invoices positive, credit notes negative.
-function revenueUnion(w, invFields, cnFields) {
+// 3-leg revenue UNION — invoices positive, credit notes and sales returns negative.
+function revenueUnion(w, invFields, cnFields, srFields) {
   return `(
     SELECT ${invFields} FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id WHERE ${w.where}
     UNION ALL
-    SELECT ${cnFields}
-    FROM credit_notes cn
-    JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-    WHERE ${w.cnWhere}
+    SELECT ${cnFields} FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id WHERE ${w.cnWhere}
+    UNION ALL
+    SELECT ${srFields} FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id WHERE ${w.srWhere}
   )`;
 }
 
@@ -195,7 +203,8 @@ function getMetrics(w) {
     SELECT COALESCE(SUM(amount), 0) AS totalRevenue, COALESCE(SUM(qty), 0) AS unitsSold
     FROM ${revenueUnion(w,
       'li.item_total AS amount, li.quantity AS qty',
-      '-cni.item_total AS amount, -cni.quantity AS qty'
+      '-cni.item_total AS amount, -cni.quantity AS qty',
+      '-sri.item_total AS amount, -sri.quantity AS qty'
     )} rev
   `).get(unionParams(w));
   const ordRow = db.prepare(`
@@ -269,7 +278,8 @@ app.get('/api/dashboard/trend', (req, res) => {
         COUNT(DISTINCT inv_id) AS orderCount
       FROM ${revenueUnion(w,
         'i.date AS raw_date, li.item_total AS amount, i.invoice_id AS inv_id',
-        'cn.date AS raw_date, -cni.item_total AS amount, NULL AS inv_id'
+        'cn.date AS raw_date, -cni.item_total AS amount, NULL AS inv_id',
+        'sr.date AS raw_date, -sri.item_total AS amount, NULL AS inv_id'
       )} trend
       GROUP BY period
       ORDER BY period ASC
@@ -318,10 +328,11 @@ app.get('/api/dashboard/products', (req, res) => {
     const pageSize = Math.min(100, parseInt(req.query.pageSize || '25', 10));
     const offset   = (page - 1) * pageSize;
 
-    // Net revenue and units per product — invoices minus credit notes
+    // Net revenue and units per product — invoices minus credit notes and sales returns
     const netUnion = revenueUnion(w,
       'li.sku AS sku, li.name AS name, li.brand AS brand, li.category AS cat, li.item_total AS amount, li.quantity AS qty',
-      'cni.sku AS sku, cni.name AS name, cni.brand AS brand, cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty'
+      'cni.sku AS sku, cni.name AS name, cni.brand AS brand, cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
+      'sri.sku AS sku, sri.name AS name, sri.brand AS brand, sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
     );
 
     const totalRow = db.prepare(`
@@ -364,7 +375,8 @@ app.get('/api/dashboard/categories', (req, res) => {
     const w = buildWhereClause(req.query);
     const netUnion = revenueUnion(w,
       'li.category AS cat, li.item_total AS amount, li.quantity AS qty',
-      'cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty'
+      'cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
+      'sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
     );
     const rows = db.prepare(`
       SELECT COALESCE(NULLIF(cat,''), 'Uncategorized') AS category,
@@ -400,7 +412,8 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
         SELECT COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(qty), 0) AS units
         FROM ${revenueUnion(w,
           'li.item_total AS amount, li.quantity AS qty',
-          '-cni.item_total AS amount, -cni.quantity AS qty'
+          '-cni.item_total AS amount, -cni.quantity AS qty',
+          '-sri.item_total AS amount, -sri.quantity AS qty'
         )} s
       `).get(unionParams(w));
       const ordRow = db.prepare(`
@@ -412,7 +425,8 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
         SELECT ${dateFmt} AS period, SUM(amount) AS revenue
         FROM ${revenueUnion(w,
           'i.date AS raw_date, li.item_total AS amount',
-          'cn.date AS raw_date, -cni.item_total AS amount'
+          'cn.date AS raw_date, -cni.item_total AS amount',
+          'sr.date AS raw_date, -sri.item_total AS amount'
         )} t
         GROUP BY period ORDER BY period ASC
       `).all(unionParams(w));
@@ -442,7 +456,8 @@ app.get('/api/dashboard/customers', (req, res) => {
     const w = buildWhereClause(req.query);
     const custUnion = revenueUnion(w,
       'i.customer_id AS cid, i.customer_name AS cname, li.item_total AS amount, i.invoice_id AS inv_id',
-      'cn.customer_id AS cid, cn.customer_name AS cname, -cni.item_total AS amount, NULL AS inv_id'
+      'cn.customer_id AS cid, cn.customer_name AS cname, -cni.item_total AS amount, NULL AS inv_id',
+      'sr.customer_id AS cid, sr.customer_name AS cname, -sri.item_total AS amount, NULL AS inv_id'
     );
     const rows = db.prepare(`
       SELECT
@@ -600,6 +615,8 @@ app.get('/api/dashboard/state-products', (req, res) => {
     const invWhere = `${w.where} AND i.shipping_state = ?`;
     // CN leg — join back to invoice to get shipping_state
     const cnWhere  = `${w.cnWhere} AND ref_inv2.shipping_state = ?`;
+    // SR leg — sales_returns has its own shipping_state
+    const srWhere2 = `${w.srWhere} AND sr.shipping_state = ?`;
     const rows = db.prepare(`
       SELECT name, sku,
         COALESCE(SUM(qty), 0)    AS units,
@@ -613,15 +630,19 @@ app.get('/api/dashboard/state-products', (req, res) => {
         SELECT cni.name, cni.sku, -cni.quantity AS qty, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        LEFT JOIN invoices ref_inv ON ref_inv.invoice_id = cn.invoice_id
         JOIN invoices ref_inv2 ON ref_inv2.invoice_id = cn.invoice_id
         WHERE ${cnWhere}
+        UNION ALL
+        SELECT sri.name, sri.sku, -sri.quantity AS qty, -sri.item_total AS amount
+        FROM sales_returns sr
+        JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+        WHERE ${srWhere2}
       )
       GROUP BY name, sku
       HAVING units > 0
       ORDER BY revenue DESC
       LIMIT 25
-    `).all([...w.params, state, ...w.cnParams, state]);
+    `).all([...w.params, state, ...w.cnParams, state, ...w.srParams, state]);
     const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
     res.json(rows.map(r => ({ ...r, pct: totalRevenue > 0 ? (r.revenue / totalRevenue) * 100 : 0 })));
   } catch (e) {
