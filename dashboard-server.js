@@ -650,7 +650,7 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
-// ── Diagnostic: invoice items breakdown ────────────────────────────────────────
+// ── Diagnostic: true duplicate line items (same name on same invoice) ──────────
 app.get('/api/debug/invoiceitems', (req, res) => {
   try {
     const { start, end, category } = req.query;
@@ -658,21 +658,23 @@ app.get('/api/debug/invoiceitems', (req, res) => {
     const e = end   || '2099-12-31';
     const catFilter = category || 'Preroll';
 
-    const items = db.prepare(`
-      SELECT li.name, i.status, COUNT(*) AS lineCount, SUM(li.quantity) AS qty
-      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
-      WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft') AND li.category = ?
-      GROUP BY li.name, i.status ORDER BY qty DESC
-    `).all(s, e, catFilter);
+    // True duplicates: same (invoice_id, name) appearing more than once
+    const trueDupes = db.prepare(`
+      SELECT li.invoice_id, i.date, i.status, li.name,
+             COUNT(*) AS rowCount, SUM(li.quantity) AS totalQty
+      FROM line_items li
+      JOIN invoices i ON i.invoice_id = li.invoice_id
+      WHERE li.category = ? AND i.date BETWEEN ? AND ?
+        AND i.status NOT IN ('void','draft')
+      GROUP BY li.invoice_id, li.name
+      HAVING rowCount > 1
+      ORDER BY totalQty DESC
+    `).all(catFilter, s, e);
 
-    const dupes = db.prepare(`
-      SELECT invoice_id, COUNT(*) AS lineCount, SUM(quantity) AS qty
-      FROM line_items WHERE category = ?
-      GROUP BY invoice_id HAVING lineCount > 1
-      ORDER BY qty DESC LIMIT 20
-    `).all(catFilter);
+    const dupeQty   = trueDupes.reduce((sum, r) => sum + Math.floor(r.totalQty / r.rowCount) * (r.rowCount - 1), 0);
+    const dupeCount = trueDupes.length;
 
-    res.json({ items, possibleDuplicateInvoices: dupes });
+    res.json({ trueDuplicateRows: dupeCount, estimatedExtraUnits: dupeQty, dupes: trueDupes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
