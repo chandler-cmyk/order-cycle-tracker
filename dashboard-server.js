@@ -650,36 +650,6 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
-// ── Diagnostic: true duplicate line items (same name on same invoice) ──────────
-app.get('/api/debug/invoiceitems', (req, res) => {
-  try {
-    const { start, end, category } = req.query;
-    const s = start || '2000-01-01';
-    const e = end   || '2099-12-31';
-    const catFilter = category || 'Preroll';
-
-    // True duplicates: same (invoice_id, name) appearing more than once
-    const trueDupes = db.prepare(`
-      SELECT li.invoice_id, i.date, i.status, li.name,
-             COUNT(*) AS rowCount, SUM(li.quantity) AS totalQty
-      FROM line_items li
-      JOIN invoices i ON i.invoice_id = li.invoice_id
-      WHERE li.category = ? AND i.date BETWEEN ? AND ?
-        AND i.status NOT IN ('void','draft')
-      GROUP BY li.invoice_id, li.name
-      HAVING rowCount > 1
-      ORDER BY totalQty DESC
-    `).all(catFilter, s, e);
-
-    const dupeQty   = trueDupes.reduce((sum, r) => sum + Math.floor(r.totalQty / r.rowCount) * (r.rowCount - 1), 0);
-    const dupeCount = trueDupes.length;
-
-    res.json({ trueDuplicateRows: dupeCount, estimatedExtraUnits: dupeQty, dupes: trueDupes });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', port: PORT, syncState });
