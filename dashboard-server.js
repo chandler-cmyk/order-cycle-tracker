@@ -650,6 +650,34 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
+// ── Diagnostic: invoice items breakdown ────────────────────────────────────────
+app.get('/api/debug/invoiceitems', (req, res) => {
+  try {
+    const { start, end, category } = req.query;
+    const s = start || '2000-01-01';
+    const e = end   || '2099-12-31';
+    const catFilter = category || 'Preroll';
+
+    const items = db.prepare(`
+      SELECT li.name, i.status, COUNT(*) AS lineCount, SUM(li.quantity) AS qty
+      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+      WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft') AND li.category = ?
+      GROUP BY li.name, i.status ORDER BY qty DESC
+    `).all(s, e, catFilter);
+
+    const dupes = db.prepare(`
+      SELECT invoice_id, COUNT(*) AS lineCount, SUM(quantity) AS qty
+      FROM line_items WHERE category = ?
+      GROUP BY invoice_id HAVING lineCount > 1
+      ORDER BY qty DESC LIMIT 20
+    `).all(catFilter);
+
+    res.json({ items, possibleDuplicateInvoices: dupes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', port: PORT, syncState });
