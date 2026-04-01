@@ -73,6 +73,21 @@ export function getPresetRange(preset) {
   if (preset === 'YTD') {
     return { start: `${today.getFullYear()}-01-01`, end };
   }
+  if (preset === 'Last Month') {
+    const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const last  = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { start: fmt(first), end: fmt(last) };
+  }
+  if (preset === 'Last Quarter') {
+    const q     = Math.floor(today.getMonth() / 3);
+    const first = new Date(today.getFullYear(), (q - 1) * 3, 1);
+    const last  = new Date(today.getFullYear(), q * 3, 0);
+    return { start: fmt(first), end: fmt(last) };
+  }
+  if (preset === 'Last Year') {
+    const y = today.getFullYear() - 1;
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+  }
   return { start: fmt(today), end };
 }
 

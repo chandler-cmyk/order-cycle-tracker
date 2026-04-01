@@ -1,7 +1,25 @@
 import { useState } from 'react';
 import { C, getPresetRange } from '../utils';
 
-const PRESETS = ['7D', '30D', '90D', 'MTD', 'QTD', 'YTD', 'Custom'];
+const PRESETS = [
+  '7D', '30D', '90D',
+  'MTD', 'QTD', 'YTD',
+  'Last Month', 'Last Quarter', 'Last Year',
+  'Custom',
+];
+
+const PRESET_LABELS = {
+  '7D': 'Last 7 Days',
+  '30D': 'Last 30 Days',
+  '90D': 'Last 90 Days',
+  'MTD': 'Month to Date',
+  'QTD': 'Quarter to Date',
+  'YTD': 'Year to Date',
+  'Last Month': 'Last Month',
+  'Last Quarter': 'Last Quarter',
+  'Last Year': 'Last Year',
+  'Custom': 'Custom Range',
+};
 
 export default function DateRangePicker({ dateRange, onChange }) {
   const [showCustom, setShowCustom] = useState(dateRange.preset === 'Custom');
@@ -18,39 +36,33 @@ export default function DateRangePicker({ dateRange, onChange }) {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <div style={{
-        display: 'flex', gap: 2,
-        background: C.bg, border: `1px solid ${C.border}`,
-        borderRadius: 8, padding: 3,
-      }}>
-        {PRESETS.map(p => {
-          const active = dateRange.preset === p;
-          return (
-            <button
-              key={p}
-              onClick={() => selectPreset(p)}
-              style={{
-                padding: '4px 11px',
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: active ? 700 : 500,
-                cursor: 'pointer',
-                border: 'none',
-                background: active ? C.surface : 'transparent',
-                color: active ? C.accent : C.textSub,
-                boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                transition: 'all 0.12s',
-              }}
-            >
-              {p}
-            </button>
-          );
-        })}
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <select
+        value={dateRange.preset || ''}
+        onChange={e => selectPreset(e.target.value)}
+        style={{
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          padding: '5px 32px 5px 12px',
+          fontSize: 13,
+          fontWeight: 500,
+          color: C.text,
+          background: `${C.surface} url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E") no-repeat right 10px center`,
+          backgroundSize: '10px',
+          appearance: 'none',
+          WebkitAppearance: 'none',
+          cursor: 'pointer',
+          outline: 'none',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        }}
+      >
+        {PRESETS.map(p => (
+          <option key={p} value={p}>{PRESET_LABELS[p]}</option>
+        ))}
+      </select>
 
       {showCustom && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input
             type="date"
             value={dateRange.start || ''}
@@ -68,7 +80,7 @@ export default function DateRangePicker({ dateRange, onChange }) {
       )}
 
       {!showCustom && dateRange.start && (
-        <span style={{ fontSize: 11, color: C.textMute, marginLeft: 4 }}>
+        <span style={{ fontSize: 11, color: C.textMute }}>
           {dateRange.start} → {dateRange.end}
         </span>
       )}
