@@ -650,7 +650,52 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
-// ── Holt-Winters Triple Exponential Smoothing ─────────────────────────────────
+// ── Holt's Double Exponential Smoothing (trend only, no seasonality) ──────────
+
+function holtDoubleRmse(data, alpha, beta) {
+  const n = data.length;
+  if (n < 4) return Infinity;
+  let L = data[0], T = data[1] - data[0];
+  let sse = 0, cnt = 0;
+  for (let t = 1; t < n; t++) {
+    sse += Math.pow(data[t] - (L + T), 2); cnt++;
+    const nL = alpha * data[t] + (1 - alpha) * (L + T);
+    T = beta * (nL - L) + (1 - beta) * T; L = nL;
+  }
+  return cnt > 0 ? Math.sqrt(sse / cnt) : Infinity;
+}
+
+function holtDouble(data, horizon) {
+  const n = data.length;
+  if (n < 4) return null;
+  const grid = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8];
+  let best = { alpha: 0.3, beta: 0.1, rmse: Infinity };
+  for (const alpha of grid) for (const beta of grid) {
+    const rmse = holtDoubleRmse(data, alpha, beta);
+    if (rmse < best.rmse) best = { alpha, beta, rmse };
+  }
+  const { alpha, beta } = best;
+  let L = data[0], T = data[1] - data[0];
+  const fitted = [null];
+  const residuals = [];
+  for (let t = 1; t < n; t++) {
+    fitted[t] = L + T;
+    residuals.push(data[t] - fitted[t]);
+    const nL = alpha * data[t] + (1 - alpha) * (L + T);
+    T = beta * (nL - L) + (1 - beta) * T; L = nL;
+  }
+  const sigma = Math.sqrt(residuals.reduce((s, r) => s + r * r, 0) / residuals.length);
+  const mape  = residuals.reduce((s, r, i) => s + Math.abs(r / (Math.abs(data[i + 1]) || 1)), 0) / residuals.length;
+  const forecast = [];
+  for (let h = 1; h <= horizon; h++) {
+    const point = Math.max(0, L + h * T);
+    const margin = 1.645 * sigma * Math.sqrt(h);
+    forecast.push({ point: Math.round(point), lower: Math.round(Math.max(0, point - margin)), upper: Math.round(point + margin) });
+  }
+  return { fitted: fitted.map(v => v != null ? Math.round(v) : null), forecast, params: { alpha, beta, gamma: null, rmse: Math.round(best.rmse), sigma: Math.round(sigma), mape } };
+}
+
+// ── Holt-Winters Triple Exponential Smoothing (seasonal, requires 24+ months) ─
 
 function hwRmse(data, alpha, beta, gamma, m) {
   const n = data.length;
@@ -743,10 +788,12 @@ app.get('/api/dashboard/forecast', (req, res) => {
     const completeRows = rows.filter(r => r.period < currentPeriod);
     const partialRow   = rows.find(r => r.period === currentPeriod);
 
-    if (completeRows.length < m * 2) return res.json({ error: 'Not enough history for forecasting', monthsAvailable: completeRows.length });
+    if (completeRows.length < 6) return res.json({ error: 'Not enough history for forecasting', monthsAvailable: completeRows.length });
 
     const revenueData = completeRows.map(r => Math.max(0, r.revenue));
-    const hw = holtwinters(revenueData, m, horizon);
+    // Use seasonal model only once we have 2 full seasonal cycles (24 months)
+    const useSeasonal = completeRows.length >= 24;
+    const hw = useSeasonal ? holtwinters(revenueData, m, horizon) : holtDouble(revenueData, horizon);
     if (!hw) return res.status(500).json({ error: 'Forecast model failed' });
 
     const lastPeriod = completeRows[completeRows.length - 1].period;
@@ -801,7 +848,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
     res.json({
       history,
       forecast,
-      model: hw.params,
+      model: { ...hw.params, modelType: useSeasonal ? 'triple' : 'double', monthsOfData: completeRows.length, seasonalAt: 24 },
       runRate: { last12m: Math.round(last12Rev), prior12m: prior12Rev != null ? Math.round(prior12Rev) : null, growth: prior12Rev ? (last12Rev - prior12Rev) / prior12Rev : null },
       categories,
     });

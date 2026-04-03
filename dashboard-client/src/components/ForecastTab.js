@@ -266,10 +266,22 @@ export default function ForecastTab() {
         </div>
       )}
 
-      {/* Model Info */}
+      {/* Model notice + info */}
+      {model.modelType === 'double' && (
+        <div style={{
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+          padding: '10px 16px', fontSize: 12, color: '#92400e', textAlign: 'center',
+        }}>
+          Using <strong>trend-only model</strong> — seasonal patterns require 24 months of data ({model.monthsOfData} of {model.seasonalAt} available).
+          The full seasonal model will activate automatically around <strong>November 2026</strong>.
+        </div>
+      )}
       <div style={{ fontSize: 11, color: C.textMute, textAlign: 'center', paddingBottom: 8 }}>
-        Holt-Winters Triple Exponential Smoothing (additive, m=12) &nbsp;·&nbsp;
-        Optimized α={model.alpha} β={model.beta} γ={model.gamma} &nbsp;·&nbsp;
+        {model.modelType === 'double'
+          ? `Holt's Double Exponential Smoothing (trend only)`
+          : `Holt-Winters Triple Exponential Smoothing (additive, m=12)`
+        } &nbsp;·&nbsp;
+        Optimized α={model.alpha} β={model.beta}{model.gamma != null ? ` γ=${model.gamma}` : ''} &nbsp;·&nbsp;
         RMSE {fmtCurrency(model.rmse)} &nbsp;·&nbsp;
         {accuracy}% in-sample accuracy &nbsp;·&nbsp;
         90% confidence intervals
