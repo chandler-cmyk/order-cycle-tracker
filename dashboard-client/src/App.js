@@ -10,6 +10,7 @@ import CustomerView from './components/CustomerView';
 import TopSkusLeaderboard from './components/TopSkusLeaderboard';
 import OutstandingInvoicesTile from './components/OutstandingInvoicesTile';
 import BrandComparison from './components/BrandComparison';
+import ForecastTab from './components/ForecastTab';
 
 // ── Nav items ──────────────────────────────────────────────────────────────────
 const NAV = [
@@ -18,6 +19,7 @@ const NAV = [
   { id: 'geography',  label: 'Sales by Region', icon: '⬡' },
   { id: 'products',   label: 'Products',   icon: '☰' },
   { id: 'customers',  label: 'Customers',  icon: '◉' },
+  { id: 'forecast',   label: 'Forecast',   icon: '◌' },
 ];
 
 // ── Sync status bar ────────────────────────────────────────────────────────────
@@ -637,6 +639,7 @@ export default function App() {
     geography: 'Sales by Region',
     products:  'Products',
     customers: 'Customers',
+    forecast:  'Sales Forecast',
   };
 
   const header = (
@@ -765,6 +768,8 @@ export default function App() {
           onFiltersChange={f => { setFilters(f); }}
         />
       );
+
+      case 'forecast': return <ForecastTab />;
 
       default: return null;
     }

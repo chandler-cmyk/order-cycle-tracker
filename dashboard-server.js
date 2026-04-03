@@ -650,6 +650,155 @@ app.get('/api/dashboard/state-products', (req, res) => {
   }
 });
 
+// ── Holt-Winters Triple Exponential Smoothing ─────────────────────────────────
+
+function hwRmse(data, alpha, beta, gamma, m) {
+  const n = data.length;
+  const L0 = data.slice(0, m).reduce((a, b) => a + b, 0) / m;
+  const Lm = data.slice(m, 2 * m).reduce((a, b) => a + b, 0) / m;
+  let L = L0, T = (Lm - L0) / m;
+  const S = data.slice(0, m).map(v => v - L0);
+  let sse = 0, cnt = 0;
+  for (let t = m; t < n; t++) {
+    const idx = t % m, ps = S[idx];
+    sse += Math.pow(data[t] - (L + T + ps), 2); cnt++;
+    const nL = alpha * (data[t] - ps) + (1 - alpha) * (L + T);
+    T = beta * (nL - L) + (1 - beta) * T; L = nL;
+    S[idx] = gamma * (data[t] - L) + (1 - gamma) * ps;
+  }
+  return cnt > 0 ? Math.sqrt(sse / cnt) : Infinity;
+}
+
+function holtwinters(data, m, horizon) {
+  const n = data.length;
+  if (n < m * 2) return null;
+  const grid = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8];
+  let best = { alpha: 0.3, beta: 0.1, gamma: 0.3, rmse: Infinity };
+  for (const alpha of grid) for (const beta of grid) for (const gamma of grid) {
+    const rmse = hwRmse(data, alpha, beta, gamma, m);
+    if (rmse < best.rmse) best = { alpha, beta, gamma, rmse };
+  }
+  const { alpha, beta, gamma } = best;
+  const L0 = data.slice(0, m).reduce((a, b) => a + b, 0) / m;
+  const Lm = data.slice(m, 2 * m).reduce((a, b) => a + b, 0) / m;
+  let L = L0, T = (Lm - L0) / m;
+  const S = data.slice(0, m).map(v => v - L0);
+  const fitted = new Array(n).fill(null);
+  const residuals = [];
+  for (let t = m; t < n; t++) {
+    const idx = t % m, ps = S[idx];
+    fitted[t] = L + T + ps;
+    residuals.push(data[t] - fitted[t]);
+    const nL = alpha * (data[t] - ps) + (1 - alpha) * (L + T);
+    T = beta * (nL - L) + (1 - beta) * T; L = nL;
+    S[idx] = gamma * (data[t] - L) + (1 - gamma) * ps;
+  }
+  const sigma = Math.sqrt(residuals.reduce((s, r) => s + r * r, 0) / residuals.length);
+  const mape  = residuals.reduce((s, r, i) => s + Math.abs(r / (Math.abs(data[i + m]) || 1)), 0) / residuals.length;
+  const forecast = [];
+  for (let h = 1; h <= horizon; h++) {
+    const sIdx = (n + h - 1) % m;
+    const point = Math.max(0, L + h * T + S[sIdx]);
+    const margin = 1.645 * sigma * Math.sqrt(h);
+    forecast.push({ point: Math.round(point), lower: Math.round(Math.max(0, point - margin)), upper: Math.round(point + margin) });
+  }
+  return { fitted: fitted.map(v => v != null ? Math.round(v) : null), forecast, params: { alpha, beta, gamma, rmse: Math.round(best.rmse), sigma: Math.round(sigma), mape } };
+}
+
+function addMonth(periodStr, n) {
+  const [y, mo] = periodStr.split('-').map(Number);
+  const d = new Date(y, mo - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// GET /api/dashboard/forecast?months=6
+app.get('/api/dashboard/forecast', (req, res) => {
+  try {
+    const horizon = Math.min(24, Math.max(1, parseInt(req.query.months) || 6));
+    const m = 12;
+
+    const rows = db.prepare(`
+      SELECT period, SUM(revenue) AS revenue, SUM(orders) AS orders, SUM(units) AS units
+      FROM (
+        SELECT strftime('%Y-%m', i.date) AS period,
+               SUM(li.item_total) AS revenue,
+               COUNT(DISTINCT i.invoice_id) AS orders,
+               SUM(li.quantity) AS units
+        FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+        WHERE i.status NOT IN ('void','draft')
+        GROUP BY period
+        UNION ALL
+        SELECT strftime('%Y-%m', cn.date) AS period,
+               -SUM(cni.item_total) AS revenue, 0 AS orders, -SUM(cni.quantity) AS units
+        FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
+        WHERE cn.status NOT IN ('void','draft')
+        GROUP BY period
+      )
+      GROUP BY period ORDER BY period ASC
+    `).all();
+
+    if (rows.length < m * 2) return res.json({ error: 'Not enough history for forecasting', monthsAvailable: rows.length });
+
+    const revenueData = rows.map(r => Math.max(0, r.revenue));
+    const hw = holtwinters(revenueData, m, horizon);
+    if (!hw) return res.status(500).json({ error: 'Forecast model failed' });
+
+    const lastPeriod = rows[rows.length - 1].period;
+    const history = rows.map((r, i) => ({
+      period: r.period,
+      revenue: Math.round(r.revenue),
+      orders: r.orders,
+      units: Math.round(r.units),
+      fitted: hw.fitted[i],
+    }));
+    const forecast = hw.forecast.map((f, i) => ({ period: addMonth(lastPeriod, i + 1), ...f }));
+
+    const last12Rev  = rows.slice(-12).reduce((s, r) => s + Math.max(0, r.revenue), 0);
+    const prior12Rev = rows.length >= 24 ? rows.slice(-24, -12).reduce((s, r) => s + Math.max(0, r.revenue), 0) : null;
+
+    // Per-category simplified forecasts
+    const catRows = db.prepare(`
+      SELECT period, category, SUM(revenue) AS revenue
+      FROM (
+        SELECT strftime('%Y-%m', i.date) AS period, li.category, SUM(li.item_total) AS revenue
+        FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+        WHERE i.status NOT IN ('void','draft') AND li.category != ''
+        GROUP BY period, li.category
+        UNION ALL
+        SELECT strftime('%Y-%m', cn.date) AS period, cni.category, -SUM(cni.item_total) AS revenue
+        FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
+        WHERE cn.status NOT IN ('void','draft') AND cni.category != ''
+        GROUP BY period, cni.category
+      )
+      GROUP BY period, category ORDER BY period ASC
+    `).all();
+
+    const catMap = {};
+    for (const r of catRows) {
+      if (!catMap[r.category]) catMap[r.category] = [];
+      catMap[r.category].push(Math.max(0, r.revenue));
+    }
+    const categories = Object.entries(catMap).map(([category, vals]) => {
+      const last6  = vals.slice(-6).reduce((s, v) => s + v, 0);
+      const prior6 = vals.slice(-12, -6).reduce((s, v) => s + v, 0);
+      const monthlyGrowth = prior6 > 0 ? Math.pow(last6 / prior6, 1 / 6) - 1 : 0;
+      const monthly = last6 / 6;
+      const next3m = [1,2,3].reduce((s, h) => s + monthly * Math.pow(1 + monthlyGrowth, h), 0);
+      return { category, last6m: Math.round(last6), prior6m: Math.round(prior6), growthRate: prior6 > 0 ? (last6 - prior6) / prior6 : 0, next3m: Math.round(next3m) };
+    }).filter(c => c.last6m > 0).sort((a, b) => b.last6m - a.last6m);
+
+    res.json({
+      history,
+      forecast,
+      model: hw.params,
+      runRate: { last12m: Math.round(last12Rev), prior12m: prior12Rev != null ? Math.round(prior12Rev) : null, growth: prior12Rev ? (last12Rev - prior12Rev) / prior12Rev : null },
+      categories,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', port: PORT, syncState });
