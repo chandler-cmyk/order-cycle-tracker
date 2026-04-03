@@ -737,24 +737,34 @@ app.get('/api/dashboard/forecast', (req, res) => {
       GROUP BY period ORDER BY period ASC
     `).all();
 
-    if (rows.length < m * 2) return res.json({ error: 'Not enough history for forecasting', monthsAvailable: rows.length });
+    // Exclude the current (incomplete) month — partial data corrupts the model
+    const now = new Date();
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const completeRows = rows.filter(r => r.period < currentPeriod);
+    const partialRow   = rows.find(r => r.period === currentPeriod);
 
-    const revenueData = rows.map(r => Math.max(0, r.revenue));
+    if (completeRows.length < m * 2) return res.json({ error: 'Not enough history for forecasting', monthsAvailable: completeRows.length });
+
+    const revenueData = completeRows.map(r => Math.max(0, r.revenue));
     const hw = holtwinters(revenueData, m, horizon);
     if (!hw) return res.status(500).json({ error: 'Forecast model failed' });
 
-    const lastPeriod = rows[rows.length - 1].period;
-    const history = rows.map((r, i) => ({
+    const lastPeriod = completeRows[completeRows.length - 1].period;
+    const history = completeRows.map((r, i) => ({
       period: r.period,
       revenue: Math.round(r.revenue),
       orders: r.orders,
       units: Math.round(r.units),
       fitted: hw.fitted[i],
     }));
+    // Include current partial month for display only (not used in model training)
+    if (partialRow) {
+      history.push({ period: partialRow.period, revenue: Math.round(partialRow.revenue), orders: partialRow.orders, units: Math.round(partialRow.units), fitted: null, partial: true });
+    }
     const forecast = hw.forecast.map((f, i) => ({ period: addMonth(lastPeriod, i + 1), ...f }));
 
-    const last12Rev  = rows.slice(-12).reduce((s, r) => s + Math.max(0, r.revenue), 0);
-    const prior12Rev = rows.length >= 24 ? rows.slice(-24, -12).reduce((s, r) => s + Math.max(0, r.revenue), 0) : null;
+    const last12Rev  = completeRows.slice(-12).reduce((s, r) => s + Math.max(0, r.revenue), 0);
+    const prior12Rev = completeRows.length >= 24 ? completeRows.slice(-24, -12).reduce((s, r) => s + Math.max(0, r.revenue), 0) : null;
 
     // Per-category simplified forecasts
     const catRows = db.prepare(`
@@ -775,6 +785,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
 
     const catMap = {};
     for (const r of catRows) {
+      if (r.period >= currentPeriod) continue; // exclude partial month from category data too
       if (!catMap[r.category]) catMap[r.category] = [];
       catMap[r.category].push(Math.max(0, r.revenue));
     }
