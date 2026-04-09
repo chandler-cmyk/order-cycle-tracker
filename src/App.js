@@ -297,6 +297,12 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const handler = () => setAuthed(false);
+    window.addEventListener('auth:logout', handler);
+    return () => window.removeEventListener('auth:logout', handler);
+  }, []);
+
   useEffect(() => { if (authed) fetchData(); }, [fetchData, authed]);
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;

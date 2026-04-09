@@ -11,10 +11,10 @@ window.fetch = (url, opts = {}) => {
     opts = { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } };
   }
   return _fetch(url, opts).then(res => {
-    // If any API call comes back unauthorized, clear the stale token and reload to show login
+    // If any API call comes back unauthorized, clear the stale token and signal the app
     if (res.status === 401 && isLocal && !url.includes('/api/login')) {
       localStorage.removeItem('auth_token');
-      window.location.reload();
+      window.dispatchEvent(new Event('auth:logout'));
     }
     return res;
   });

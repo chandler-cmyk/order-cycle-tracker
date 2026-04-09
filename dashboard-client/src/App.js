@@ -487,6 +487,12 @@ function LoginScreen({ onLogin }) {
 // ── Main App ───────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('auth_token'));
+
+  useEffect(() => {
+    const handler = () => setAuthed(false);
+    window.addEventListener('auth:logout', handler);
+    return () => window.removeEventListener('auth:logout', handler);
+  }, []);
   const [activeView, setActiveView] = useState('overview');
   const [dateRange, setDateRange]   = useState(() => {
     const r = getPresetRange('30D');
