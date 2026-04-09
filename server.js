@@ -1,8 +1,10 @@
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
+const fs        = require('fs');
+const crypto    = require('crypto');
+const rateLimit = require('express-rate-limit');
+const fetch     = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 require('dotenv').config();
 
 // Keep in sync with SUB_CUSTOMERS in src/utils.js
@@ -47,7 +49,8 @@ const SUB_CUSTOMERS = [
 ];
 
 const app = express();
-app.use(cors());
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
@@ -59,11 +62,23 @@ const {
   SITE_PASSWORD,
 } = process.env;
 
-app.post('/api/login', (req, res) => {
+const validTokens = new Set();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { ok: false, error: 'Too many login attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post('/api/login', loginLimiter, (req, res) => {
   if (!SITE_PASSWORD) return res.json({ ok: true, token: 'open' });
   const { password } = req.body;
   if (password === SITE_PASSWORD) {
-    res.json({ ok: true, token: SITE_PASSWORD });
+    const token = crypto.randomBytes(32).toString('hex');
+    validTokens.add(token);
+    res.json({ ok: true, token });
   } else {
     res.status(401).json({ ok: false, error: 'Incorrect password' });
   }
@@ -72,7 +87,8 @@ app.post('/api/login', (req, res) => {
 app.use('/api', (req, res, next) => {
   if (!SITE_PASSWORD) return next();
   const auth = req.headers.authorization;
-  if (auth === `Bearer ${SITE_PASSWORD}`) return next();
+  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (bearer && validTokens.has(bearer)) return next();
   res.status(401).json({ error: 'Unauthorized' });
 });
 
