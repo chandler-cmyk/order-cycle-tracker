@@ -62,7 +62,11 @@ const {
   SITE_PASSWORD,
 } = process.env;
 
-const validTokens = new Set();
+// Deterministic token derived from the password — survives server restarts
+// without requiring server-side session storage
+function makeToken(password) {
+  return crypto.createHmac('sha256', password).update('nysw-dashboard-auth').digest('hex');
+}
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -76,9 +80,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   if (!SITE_PASSWORD) return res.json({ ok: true, token: 'open' });
   const { password } = req.body;
   if (password === SITE_PASSWORD) {
-    const token = crypto.randomBytes(32).toString('hex');
-    validTokens.add(token);
-    res.json({ ok: true, token });
+    res.json({ ok: true, token: makeToken(SITE_PASSWORD) });
   } else {
     res.status(401).json({ ok: false, error: 'Incorrect password' });
   }
@@ -88,7 +90,7 @@ app.use('/api', (req, res, next) => {
   if (!SITE_PASSWORD) return next();
   const auth = req.headers.authorization;
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (bearer && validTokens.has(bearer)) return next();
+  if (bearer === makeToken(SITE_PASSWORD)) return next();
   res.status(401).json({ error: 'Unauthorized' });
 });
 

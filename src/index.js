@@ -10,7 +10,14 @@ window.fetch = (url, opts = {}) => {
   if (token && isLocal) {
     opts = { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } };
   }
-  return _fetch(url, opts);
+  return _fetch(url, opts).then(res => {
+    // If any API call comes back unauthorized, clear the stale token and reload to show login
+    if (res.status === 401 && isLocal && !url.includes('/api/login')) {
+      localStorage.removeItem('auth_token');
+      window.location.reload();
+    }
+    return res;
+  });
 };
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
