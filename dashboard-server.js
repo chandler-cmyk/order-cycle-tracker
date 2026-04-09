@@ -123,7 +123,22 @@ function buildWhereClause(query) {
   const cnParams = [s, e];
 
   // Sales return side — subtract returned units/revenue, same date-window logic.
-  const srCond   = [`sr.date BETWEEN ? AND ?`, `sr.status NOT IN ('void','draft')`];
+  // Exclude SR line items that already have a matching Credit Note (same customer, product, qty,
+  // within 14 days). Zoho auto-creates a CN when a Sales Return is processed, so both documents
+  // exist for the same return — without this guard we'd deduct the same return twice.
+  const srCond   = [
+    `sr.date BETWEEN ? AND ?`,
+    `sr.status NOT IN ('void','draft')`,
+    `NOT EXISTS (
+      SELECT 1 FROM credit_notes cn_dup
+      JOIN credit_note_items cni_dup ON cn_dup.creditnote_id = cni_dup.creditnote_id
+      WHERE cn_dup.customer_id = sr.customer_id
+        AND ABS(JULIANDAY(cn_dup.date) - JULIANDAY(sr.date)) <= 14
+        AND cni_dup.name = sri.name
+        AND cni_dup.quantity = sri.quantity
+        AND cn_dup.status NOT IN ('void','draft')
+    )`,
+  ];
   const srParams = [s, e];
 
   if (brands) {
@@ -869,6 +884,68 @@ app.get('/api/dashboard/forecast', (req, res) => {
       model: { ...hw.params, modelType: useSeasonal ? 'triple' : 'double', monthsOfData: completeRows.length, seasonalAt: 24 },
       runRate: { last12m: Math.round(last12Rev), prior12m: prior12Rev != null ? Math.round(prior12Rev) : null, growth: prior12Rev ? (last12Rev - prior12Rev) / prior12Rev : null },
       categories,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Diagnostic: revenue breakdown ─────────────────────────────────────────────
+// GET /api/dashboard/revenue-debug?start=&end=
+// Shows invoice total, CN total, SR total, and whether any SRs have linked CNs
+app.get('/api/dashboard/revenue-debug', (req, res) => {
+  try {
+    const s = req.query.start || '2000-01-01';
+    const e = req.query.end   || '2099-12-31';
+
+    const invoiceTotal = db.prepare(`
+      SELECT COALESCE(SUM(li.item_total), 0) AS total, COUNT(DISTINCT i.invoice_id) AS count
+      FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
+      WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft')
+    `).get([s, e]);
+
+    const cnTotal = db.prepare(`
+      SELECT COALESCE(SUM(cni.item_total), 0) AS total, COUNT(DISTINCT cn.creditnote_id) AS count
+      FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
+      WHERE cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
+    `).get([s, e]);
+
+    const srTotal = db.prepare(`
+      SELECT COALESCE(SUM(sri.item_total), 0) AS total, COUNT(DISTINCT sr.salesreturn_id) AS count
+      FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+      WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
+    `).get([s, e]);
+
+    // Check: how many SRs in this window also have a CN linked to the same invoice?
+    const srWithCn = db.prepare(`
+      SELECT sr.salesreturn_id, sr.salesreturn_number, sr.date AS sr_date,
+             COALESCE(SUM(sri.item_total), 0) AS sr_amount,
+             cn.creditnote_id, cn.creditnote_number, cn.date AS cn_date,
+             COALESCE(SUM(cni.item_total), 0) AS cn_amount
+      FROM sales_returns sr
+      JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+      JOIN credit_notes cn ON cn.invoice_id = sr.invoice_id
+      JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
+      WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
+        AND cn.status NOT IN ('void','draft')
+      GROUP BY sr.salesreturn_id, cn.creditnote_id
+      ORDER BY sr.date DESC
+    `).all([s, e]);
+
+    const doubleDeductedTotal = srWithCn.reduce((sum, r) => sum + Math.min(r.sr_amount, r.cn_amount), 0);
+
+    res.json({
+      period: { start: s, end: e },
+      invoiceTotal:      Math.round(invoiceTotal.total * 100) / 100,
+      invoiceCount:      invoiceTotal.count,
+      cnDeduction:       Math.round(cnTotal.total * 100) / 100,
+      cnCount:           cnTotal.count,
+      srDeduction:       Math.round(srTotal.total * 100) / 100,
+      srCount:           srTotal.count,
+      netRevenue:        Math.round((invoiceTotal.total - cnTotal.total - srTotal.total) * 100) / 100,
+      srWithLinkedCn:    srWithCn.length,
+      doubleDeductedEst: Math.round(doubleDeductedTotal * 100) / 100,
+      srCnOverlap:       srWithCn,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
