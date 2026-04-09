@@ -4,13 +4,18 @@ import App from './App';
 
 // Inject auth token into same-origin API requests only
 const _fetch = window.fetch;
+
+function getRequestUrl(input) {
+  try {
+    if (typeof input === 'string') return input;
+    if (input && typeof input.url === 'string') return input.url;
+    if (typeof URL !== 'undefined' && input instanceof URL) return input.toString();
+  } catch (_) {}
+  return '';
+}
+
 window.fetch = (input, opts = {}) => {
-  const requestUrl =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : (input && typeof input.url === 'string' ? input.url : '');
+  const requestUrl = getRequestUrl(input);
 
   const token = localStorage.getItem('auth_token');
   const isLocal = !!requestUrl && (requestUrl.startsWith('/') || requestUrl.startsWith(window.location.origin));
