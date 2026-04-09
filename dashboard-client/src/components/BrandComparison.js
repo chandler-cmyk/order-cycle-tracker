@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
 import { C, fmtCurrency, fmtNumber, fmtDate } from '../utils';
 

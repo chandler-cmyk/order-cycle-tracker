@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
+  ResponsiveContainer, XAxis, YAxis,
   CartesianGrid, Tooltip, Area, AreaChart,
 } from 'recharts';
 import { C, fmtCurrency, fmtDate } from '../utils';
