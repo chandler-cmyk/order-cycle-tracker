@@ -4,15 +4,24 @@ import App from './App';
 
 // Inject auth token into same-origin API requests only
 const _fetch = window.fetch;
-window.fetch = (url, opts = {}) => {
+window.fetch = (input, opts = {}) => {
+  const requestUrl =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : (input && typeof input.url === 'string' ? input.url : '');
+
   const token = localStorage.getItem('auth_token');
-  const isLocal = typeof url === 'string' && (url.startsWith('/') || url.startsWith(window.location.origin));
+  const isLocal = !!requestUrl && (requestUrl.startsWith('/') || requestUrl.startsWith(window.location.origin));
+
   if (token && isLocal) {
     opts = { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } };
   }
-  return _fetch(url, opts).then(res => {
+
+  return _fetch(input, opts).then(res => {
     // If any API call comes back unauthorized, clear the stale token and signal the app
-    if (res.status === 401 && isLocal && !url.includes('/api/login')) {
+    if (res.status === 401 && isLocal && !requestUrl.includes('/api/login')) {
       localStorage.removeItem('auth_token');
       window.dispatchEvent(new Event('auth:logout'));
     }

@@ -308,7 +308,7 @@ const _saveSalesReturnTx = db.transaction((sr, lineItems) => {
 });
 
 // ── Sales return sync ─────────────────────────────────────────────────────────
-async function syncSalesReturns(token) {
+async function syncSalesReturns(token, deltaFilter) {
   const _checkExistingSR = db.prepare(
     `SELECT last_modified_time FROM sales_returns WHERE salesreturn_id = ?`
   );
@@ -321,6 +321,7 @@ async function syncSalesReturns(token) {
     url.searchParams.set('organization_id', ZOHO_ORG_ID);
     url.searchParams.set('per_page', '200');
     url.searchParams.set('page', String(page));
+    if (deltaFilter) url.searchParams.set('last_modified_time', toZohoTimestamp(deltaFilter));
     const res = await fetchWithRetry(url.toString(), { Authorization: `Zoho-oauthtoken ${token}` });
     if (!res || !res.ok) {
       console.warn(`  ⚠️  Sales returns page ${page} failed: ${res?.status}`);

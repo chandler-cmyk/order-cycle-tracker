@@ -84,7 +84,11 @@ function useFetch(url) {
     setLoading(true);
     setError(null);
     fetch(url, { signal: abortRef.current.signal })
-      .then(r => r.json())
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+        return d;
+      })
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { if (e.name !== 'AbortError') { setError(e.message); setLoading(false); } });
   }, [url]);
@@ -226,7 +230,7 @@ function StateCustomerPanel({ state, dateRange, filters, onClose }) {
       .catch(() => setLoading(false));
   }, [state.abbr, dateRange, filters]);
 
-  const rows = data || [];
+  const rows = Array.isArray(data) ? data : [];
   const totalRev = rows.reduce((s, r) => s + r.revenue, 0);
 
   return (
@@ -324,7 +328,7 @@ function StateProductPanel({ state, dateRange, filters }) {
       .catch(() => setLoading(false));
   }, [state.abbr, dateRange, filters]);
 
-  const rows = data || [];
+  const rows = Array.isArray(data) ? data : [];
   const totalRev = rows.reduce((s, r) => s + r.revenue, 0);
 
   return (

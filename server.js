@@ -61,11 +61,37 @@ const {
   ZOHO_ORG_ID,
   SITE_PASSWORD,
 } = process.env;
+const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12', 10);
+const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
+const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
 
-// Deterministic token derived from the password — survives server restarts
-// without requiring server-side session storage
+function signToken(password, payload) {
+  return crypto.createHmac('sha256', password).update(payload).digest('hex');
+}
+
+function safeEqual(a, b) {
+  const aBuf = Buffer.from(String(a));
+  const bBuf = Buffer.from(String(b));
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+// Stateless expiring token: "<expiresAtMs>.<hmac>"
 function makeToken(password) {
-  return crypto.createHmac('sha256', password).update('nysw-dashboard-auth').digest('hex');
+  const expiresAt = Date.now() + TOKEN_TTL_MS;
+  const payload = String(expiresAt);
+  return `${payload}.${signToken(password, payload)}`;
+}
+
+function verifyToken(token, password) {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [expiresAtRaw, sig] = parts;
+  const expiresAt = Number(expiresAtRaw);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+  const expected = signToken(password, expiresAtRaw);
+  return safeEqual(sig, expected);
 }
 
 const loginLimiter = rateLimit({
@@ -80,7 +106,7 @@ app.post('/api/login', loginLimiter, (req, res) => {
   if (!SITE_PASSWORD) return res.json({ ok: true, token: 'open' });
   const { password } = req.body;
   if (password === SITE_PASSWORD) {
-    res.json({ ok: true, token: makeToken(SITE_PASSWORD) });
+    res.json({ ok: true, token: makeToken(SITE_PASSWORD), expiresInHours: TOKEN_TTL_HOURS });
   } else {
     res.status(401).json({ ok: false, error: 'Incorrect password' });
   }
@@ -90,7 +116,7 @@ app.use('/api', (req, res, next) => {
   if (!SITE_PASSWORD) return next();
   const auth = req.headers.authorization;
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (bearer === makeToken(SITE_PASSWORD)) return next();
+  if (verifyToken(bearer, SITE_PASSWORD)) return next();
   res.status(401).json({ error: 'Unauthorized' });
 });
 
