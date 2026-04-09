@@ -34,5 +34,45 @@ window.fetch = (input, opts = {}) => {
   });
 };
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, message: error?.message || 'Unexpected application error' };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#f8fafc',
+          color: '#0f172a',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          padding: 24,
+        }}>
+          <div style={{ maxWidth: 560, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Dashboard Error</div>
+            <div style={{ fontSize: 13, color: '#475569' }}>{this.state.message}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<React.StrictMode><App /></React.StrictMode>);
+root.render(
+  <React.StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </React.StrictMode>
+);

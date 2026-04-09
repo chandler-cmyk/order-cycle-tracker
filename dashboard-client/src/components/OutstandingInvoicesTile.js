@@ -10,13 +10,20 @@ const STATUS_CFG = {
 export default function OutstandingInvoicesTile() {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
 
   useEffect(() => {
     fetch('/api/dashboard/outstanding')
-      .then(r => r.json())
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+        return d;
+      })
       .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch((e) => { setError(e.message); setLoading(false); });
   }, []);
+
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
 
   return (
     <div style={{
@@ -33,6 +40,8 @@ export default function OutstandingInvoicesTile() {
         <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: 24, height: 24, border: `3px solid ${C.border}`, borderTopColor: C.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
         </div>
+      ) : error ? (
+        <div style={{ padding: 20, color: '#dc2626', fontSize: 13 }}>{error}</div>
       ) : !data ? (
         <div style={{ padding: 20, color: C.textMute, fontSize: 13 }}>No data</div>
       ) : (
@@ -57,7 +66,7 @@ export default function OutstandingInvoicesTile() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(data.rows || []).map(row => {
+            {rows.map(row => {
               const cfg = STATUS_CFG[row.status] || { label: row.status, color: C.textMute, bg: C.bg, border: C.border };
               return (
                 <div key={row.status} style={{
@@ -77,7 +86,7 @@ export default function OutstandingInvoicesTile() {
                 </div>
               );
             })}
-            {data.rows.length === 0 && (
+            {rows.length === 0 && (
               <div style={{ color: C.textMute, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
                 No outstanding invoices
               </div>
