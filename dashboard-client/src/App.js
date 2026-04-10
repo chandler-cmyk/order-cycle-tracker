@@ -539,8 +539,6 @@ export default function App() {
     return () => clearTimeout(syncPollRef.current);
   }, [pollSync, authed]);
 
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
-
   const triggerSync = () => {
     fetch('/api/sync', { method: 'POST' })
       .then(() => { setTimeout(pollSync, 500); })
@@ -548,9 +546,10 @@ export default function App() {
   };
 
   // ── Build API query strings ──────────────────────────────────────────────────
-  const q = buildQuery(dateRange, filters);
+  const q = authed ? buildQuery(dateRange, filters) : '';
 
   const trendQ = (() => {
+    if (!authed) return '';
     const p = new URLSearchParams();
     if (dateRange.start) p.set('start', dateRange.start);
     if (dateRange.end)   p.set('end',   dateRange.end);
@@ -562,6 +561,7 @@ export default function App() {
   })();
 
   const productQ = (() => {
+    if (!authed) return '';
     const p = new URLSearchParams();
     if (dateRange.start) p.set('start', dateRange.start);
     if (dateRange.end)   p.set('end',   dateRange.end);
@@ -576,11 +576,11 @@ export default function App() {
   })();
 
   // ── Fetch data ───────────────────────────────────────────────────────────────
-  const metrics    = useFetch(`/api/dashboard/metrics${q}`);
-  const trend      = useFetch(`/api/dashboard/trend${trendQ}`);
-  const states     = useFetch(`/api/dashboard/states${q}`);
-  const products   = useFetch(`/api/dashboard/products${productQ}`);
-  const categories = useFetch(`/api/dashboard/categories${q}`);
+  const metrics    = useFetch(authed ? `/api/dashboard/metrics${q}` : null);
+  const trend      = useFetch(authed ? `/api/dashboard/trend${trendQ}` : null);
+  const states     = useFetch(authed ? `/api/dashboard/states${q}` : null);
+  const products   = useFetch(authed ? `/api/dashboard/products${productQ}` : null);
+  const categories = useFetch(authed ? `/api/dashboard/categories${q}` : null);
 
   // Reset page when filters/sort change
   useEffect(() => { setProductPage(1); }, [filters, dateRange, productSort]);
@@ -784,6 +784,8 @@ export default function App() {
       default: return null;
     }
   }
+
+  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: C.bg }}>
