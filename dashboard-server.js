@@ -67,7 +67,8 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD;
 const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12', 10);
 const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
 const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
-const INCLUDE_SALES_RETURNS = /^1|true|yes$/i.test(String(process.env.INCLUDE_SALES_RETURNS || ''));
+const includeSalesReturnsRaw = String(process.env.INCLUDE_SALES_RETURNS || 'true').toLowerCase();
+const INCLUDE_SALES_RETURNS = !['0', 'false', 'no'].includes(includeSalesReturnsRaw);
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -150,21 +151,10 @@ function buildWhereClause(query) {
   const cnParams = [s, e];
 
   // Sales return side — subtract returned units/revenue, same date-window logic.
-  // Exclude SR line items that already have a matching Credit Note (same customer, product, qty,
-  // within 14 days). Zoho auto-creates a CN when a Sales Return is processed, so both documents
-  // exist for the same return — without this guard we'd deduct the same return twice.
+  // Do not fuzzy-dedupe against credit notes; it can under-deduct and drift from Zoho report totals.
   const srCond   = [
     `sr.date BETWEEN ? AND ?`,
     `sr.status NOT IN ('void','draft')`,
-    `NOT EXISTS (
-      SELECT 1 FROM credit_notes cn_dup
-      JOIN credit_note_items cni_dup ON cn_dup.creditnote_id = cni_dup.creditnote_id
-      WHERE cn_dup.customer_id = sr.customer_id
-        AND ABS(JULIANDAY(cn_dup.date) - JULIANDAY(sr.date)) <= 14
-        AND cni_dup.name = sri.name
-        AND cni_dup.quantity = sri.quantity
-        AND cn_dup.status NOT IN ('void','draft')
-    )`,
   ];
   const srParams = [s, e];
 
