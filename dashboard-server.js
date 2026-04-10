@@ -67,6 +67,7 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD;
 const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12', 10);
 const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
 const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
+const INCLUDE_SALES_RETURNS = /^1|true|yes$/i.test(String(process.env.INCLUDE_SALES_RETURNS || ''));
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -202,16 +203,25 @@ function buildWhereClause(query) {
 }
 
 // Convenience: params for a 3-leg revenue UNION (invoices + CNs + SRs)
-function unionParams(w) { return [...w.params, ...w.cnParams, ...w.srParams]; }
+function unionParams(w) {
+  return INCLUDE_SALES_RETURNS
+    ? [...w.params, ...w.cnParams, ...w.srParams]
+    : [...w.params, ...w.cnParams];
+}
 
 // 3-leg revenue UNION — invoices positive, credit notes and sales returns negative.
 function revenueUnion(w, invFields, cnFields, srFields) {
+  const srLeg = INCLUDE_SALES_RETURNS
+    ? `
+    UNION ALL
+    SELECT ${srFields} FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id WHERE ${w.srWhere}
+  `
+    : '';
   return `(
     SELECT ${invFields} FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id WHERE ${w.where}
     UNION ALL
     SELECT ${cnFields} FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id WHERE ${w.cnWhere}
-    UNION ALL
-    SELECT ${srFields} FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id WHERE ${w.srWhere}
+    ${srLeg}
   )`;
 }
 
@@ -676,34 +686,57 @@ app.get('/api/dashboard/state-products', (req, res) => {
     const invWhere = `${w.where} AND i.shipping_state = ?`;
     // CN leg — join back to invoice to get shipping_state
     const cnWhere  = `${w.cnWhere} AND ref_inv2.shipping_state = ?`;
-    // SR leg — sales_returns has its own shipping_state
-    const srWhere2 = `${w.srWhere} AND sr.shipping_state = ?`;
-    const rows = db.prepare(`
-      SELECT name, sku,
-        COALESCE(SUM(qty), 0)    AS units,
-        COALESCE(SUM(amount), 0) AS revenue
-      FROM (
+    const unions = [
+      {
+        sql: `
         SELECT li.name, li.sku, li.quantity AS qty, li.item_total AS amount
         FROM invoices i
         JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE ${invWhere}
-        UNION ALL
+        `,
+        params: [...w.params, state],
+      },
+      {
+        sql: `
         SELECT cni.name, cni.sku, -cni.quantity AS qty, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
         JOIN invoices ref_inv2 ON ref_inv2.invoice_id = cn.invoice_id
         WHERE ${cnWhere}
-        UNION ALL
+        `,
+        params: [...w.cnParams, state],
+      },
+    ];
+
+    // Optional SR leg — disabled by default for Zoho Sales by Item parity.
+    if (INCLUDE_SALES_RETURNS) {
+      const srWhere2 = `${w.srWhere} AND sr.shipping_state = ?`;
+      unions.push({
+        sql: `
         SELECT sri.name, sri.sku, -sri.quantity AS qty, -sri.item_total AS amount
         FROM sales_returns sr
         JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
         WHERE ${srWhere2}
+        `,
+        params: [...w.srParams, state],
+      });
+    }
+
+    const unionSql = unions.map(u => u.sql.trim()).join('\n        UNION ALL\n');
+    const params = unions.flatMap(u => u.params);
+
+    const rows = db.prepare(`
+      SELECT name, sku,
+        COALESCE(SUM(qty), 0)    AS units,
+        COALESCE(SUM(amount), 0) AS revenue
+      FROM (
+        ${unionSql}
       )
       GROUP BY name, sku
       HAVING units > 0
       ORDER BY revenue DESC
       LIMIT 25
-    `).all([...w.params, state, ...w.cnParams, state, ...w.srParams, state]);
+    `).all(params);
     const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
     res.json(rows.map(r => ({ ...r, pct: totalRevenue > 0 ? (r.revenue / totalRevenue) * 100 : 0 })));
   } catch (e) {
@@ -962,15 +995,19 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
 
     const doubleDeductedTotal = srWithCn.reduce((sum, r) => sum + Math.min(r.sr_amount, r.cn_amount), 0);
 
+    const srApplied = INCLUDE_SALES_RETURNS ? srTotal.total : 0;
+
     res.json({
       period: { start: s, end: e },
+      includeSalesReturns: INCLUDE_SALES_RETURNS,
       invoiceTotal:      Math.round(invoiceTotal.total * 100) / 100,
       invoiceCount:      invoiceTotal.count,
       cnDeduction:       Math.round(cnTotal.total * 100) / 100,
       cnCount:           cnTotal.count,
       srDeduction:       Math.round(srTotal.total * 100) / 100,
+      srDeductionApplied: Math.round(srApplied * 100) / 100,
       srCount:           srTotal.count,
-      netRevenue:        Math.round((invoiceTotal.total - cnTotal.total - srTotal.total) * 100) / 100,
+      netRevenue:        Math.round((invoiceTotal.total - cnTotal.total - srApplied) * 100) / 100,
       srWithLinkedCn:    srWithCn.length,
       doubleDeductedEst: Math.round(doubleDeductedTotal * 100) / 100,
       srCnOverlap:       srWithCn,
@@ -990,6 +1027,7 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Sales Dashboard API on http://localhost:${PORT}`);
   console.log(`   SQLite DB:  data/invoices.db`);
   console.log(`   Frontend:   http://localhost:3003 (run: cd dashboard-client && npm start)\n`);
+  console.log(`   Revenue model: invoices - credit notes${INCLUDE_SALES_RETURNS ? ' - sales returns' : ''}`);
 
   // Re-derive brand/category from item names on every startup (fast, local only)
   const invCount = db.prepare(`SELECT COUNT(*) as c FROM invoices`).get()?.c || 0;
