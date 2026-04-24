@@ -3,13 +3,21 @@ import {
   ResponsiveContainer, ComposedChart, Bar, Line, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
-import { C, fmtCurrency, fmtNumber } from '../utils';
+import { C, fmtCurrency } from '../utils';
 
 function fmtPeriod(p) {
   if (!p) return '';
   const [y, m] = p.split('-');
   const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m) - 1];
   return `${mon} '${y.slice(2)}`;
+}
+
+function fmtAxisRevenue(v) {
+  if (v == null) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `$${parseFloat((v / 1_000_000).toFixed(1))}M`;
+  if (abs >= 1_000) return `$${Math.round(v / 1_000)}K`;
+  return `$${Math.round(v)}`;
 }
 
 function KpiCard({ label, value, sub, accent }) {
@@ -204,10 +212,10 @@ export default function ForecastTab() {
             />
             <YAxis
               tick={{ fontSize: 11, fill: C.textMute }}
-              tickFormatter={v => v >= 1000 ? `$${Math.round(v / 1000)}K` : `$${v}`}
+              tickFormatter={fmtAxisRevenue}
               tickLine={false}
               axisLine={false}
-              width={60}
+              width={72}
             />
             <Tooltip content={<CustomTooltip />} />
             {firstForecastPeriod && (
