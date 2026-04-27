@@ -136,6 +136,61 @@ if (require('fs').existsSync(CLIENT_BUILD)) {
 }
 
 // ── Query filter builder ───────────────────────────────────────────────────────
+function docItemTotalSql(table, idColumn, docRef, alias) {
+  return `(SELECT ROUND(COALESCE(SUM(${alias}.item_total), 0), 2) FROM ${table} ${alias} WHERE ${alias}.${idColumn} = ${docRef})`;
+}
+
+function docItemCountSql(table, idColumn, docRef, alias) {
+  return `(SELECT COUNT(*) FROM ${table} ${alias} WHERE ${alias}.${idColumn} = ${docRef})`;
+}
+
+function docItemSignatureSql(table, idColumn, docRef, alias) {
+  return `(
+    SELECT COALESCE(GROUP_CONCAT(sig_part, '||'), '')
+    FROM (
+      SELECT printf('%s|%s|%.2f',
+        COALESCE(${alias}.name, ''),
+        TRIM(printf('%.10g', COALESCE(${alias}.quantity, 0))),
+        ROUND(COALESCE(${alias}.item_total, 0), 2)
+      ) AS sig_part
+      FROM ${table} ${alias}
+      WHERE ${alias}.${idColumn} = ${docRef}
+      ORDER BY COALESCE(${alias}.name, ''), COALESCE(${alias}.quantity, 0), ROUND(COALESCE(${alias}.item_total, 0), 2), ${alias}.id
+    )
+  )`;
+}
+
+function linkedCreditNoteExistsSql(srAlias = 'sr') {
+  return `EXISTS (
+    SELECT 1
+    FROM sales_return_credit_notes srcn
+    JOIN credit_notes cn_link ON cn_link.creditnote_id = srcn.creditnote_id
+    WHERE srcn.salesreturn_id = ${srAlias}.salesreturn_id
+      AND cn_link.status NOT IN ('void','draft')
+  )`;
+}
+
+function exactCreditNoteFallbackExistsSql(srAlias = 'sr') {
+  const customerMatch = `(
+    (COALESCE(${srAlias}.customer_id, '') <> '' AND cn_match.customer_id = ${srAlias}.customer_id)
+    OR
+    (COALESCE(${srAlias}.customer_id, '') = '' AND cn_match.customer_name = ${srAlias}.customer_name)
+  )`;
+  return `EXISTS (
+    SELECT 1
+    FROM credit_notes cn_match
+    WHERE cn_match.status NOT IN ('void','draft')
+      AND ABS(JULIANDAY(cn_match.date) - JULIANDAY(${srAlias}.date)) <= 14
+      AND ${customerMatch}
+      AND ${docItemTotalSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_total')} =
+          ${docItemTotalSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_total')}
+      AND ${docItemCountSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_count')} =
+          ${docItemCountSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_count')}
+      AND ${docItemSignatureSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_sig')} =
+          ${docItemSignatureSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_sig')}
+  )`;
+}
+
 function buildWhereClause(query) {
   const { start, end, brands, categories, sku } = query;
   const s = start || '2000-01-01';
@@ -155,6 +210,11 @@ function buildWhereClause(query) {
   const srCond   = [
     `sr.date BETWEEN ? AND ?`,
     `sr.status NOT IN ('void','draft')`,
+    `NOT ${linkedCreditNoteExistsSql('sr')}`,
+    `NOT (
+      COALESCE(sr.linked_creditnote_sync_version, 0) = 0
+      AND ${exactCreditNoteFallbackExistsSql('sr')}
+    )`,
   ];
   const srParams = [s, e];
 
@@ -943,7 +1003,8 @@ app.get('/api/dashboard/forecast', (req, res) => {
 
 // ── Diagnostic: revenue breakdown ─────────────────────────────────────────────
 // GET /api/dashboard/revenue-debug?start=&end=
-// Shows invoice total, CN total, SR total, and whether any SRs have linked CNs
+// Shows invoice total, CN total, SR total, and which SRs are excluded because
+// Zoho also linked them to finalized credit notes.
 app.get('/api/dashboard/revenue-debug', (req, res) => {
   try {
     const s = req.query.start || '2000-01-01';
@@ -967,25 +1028,38 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
     `).get([s, e]);
 
-    // Check: how many SRs in this window also have a CN linked to the same invoice?
-    const srWithCn = db.prepare(`
-      SELECT sr.salesreturn_id, sr.salesreturn_number, sr.date AS sr_date,
-             COALESCE(SUM(sri.item_total), 0) AS sr_amount,
-             cn.creditnote_id, cn.creditnote_number, cn.date AS cn_date,
-             COALESCE(SUM(cni.item_total), 0) AS cn_amount
+    const srWithLinkedCn = db.prepare(`
+      SELECT
+        sr.salesreturn_id,
+        sr.salesreturn_number,
+        sr.date AS sr_date,
+        ROUND(COALESCE(SUM(sri.item_total), 0), 2) AS sr_amount,
+        cn.creditnote_id,
+        cn.creditnote_number,
+        cn.date AS cn_date,
+        ROUND((
+          SELECT COALESCE(SUM(cni2.item_total), 0)
+          FROM credit_note_items cni2
+          WHERE cni2.creditnote_id = cn.creditnote_id
+        ), 2) AS cn_amount
       FROM sales_returns sr
       JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
-      JOIN credit_notes cn ON cn.invoice_id = sr.invoice_id
-      JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
+      JOIN sales_return_credit_notes srcn ON srcn.salesreturn_id = sr.salesreturn_id
+      JOIN credit_notes cn ON cn.creditnote_id = srcn.creditnote_id
       WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
         AND cn.status NOT IN ('void','draft')
       GROUP BY sr.salesreturn_id, cn.creditnote_id
-      ORDER BY sr.date DESC
+      ORDER BY sr.date DESC, cn.date DESC
     `).all([s, e]);
 
-    const doubleDeductedTotal = srWithCn.reduce((sum, r) => sum + Math.min(r.sr_amount, r.cn_amount), 0);
+    const linkedSrDeduction = srWithLinkedCn.reduce((sum, row) => {
+      if (sum.seen.has(row.salesreturn_id)) return sum;
+      sum.seen.add(row.salesreturn_id);
+      sum.total += row.sr_amount;
+      return sum;
+    }, { seen: new Set(), total: 0 });
 
-    const srApplied = INCLUDE_SALES_RETURNS ? srTotal.total : 0;
+    const srApplied = INCLUDE_SALES_RETURNS ? srTotal.total - linkedSrDeduction.total : 0;
 
     res.json({
       period: { start: s, end: e },
@@ -997,10 +1071,10 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       srDeduction:       Math.round(srTotal.total * 100) / 100,
       srDeductionApplied: Math.round(srApplied * 100) / 100,
       srCount:           srTotal.count,
+      srLinkedCnDeductionExcluded: Math.round(linkedSrDeduction.total * 100) / 100,
       netRevenue:        Math.round((invoiceTotal.total - cnTotal.total - srApplied) * 100) / 100,
-      srWithLinkedCn:    srWithCn.length,
-      doubleDeductedEst: Math.round(doubleDeductedTotal * 100) / 100,
-      srCnOverlap:       srWithCn,
+      srWithLinkedCn:    linkedSrDeduction.seen.size,
+      srCnOverlap:       srWithLinkedCn,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1017,7 +1091,7 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Sales Dashboard API on http://localhost:${PORT}`);
   console.log(`   SQLite DB:  data/invoices.db`);
   console.log(`   Frontend:   http://localhost:3003 (run: cd dashboard-client && npm start)\n`);
-  console.log(`   Revenue model: invoices - credit notes${INCLUDE_SALES_RETURNS ? ' - sales returns' : ''}`);
+  console.log(`   Revenue model: invoices - credit notes${INCLUDE_SALES_RETURNS ? ' - unmatched sales returns' : ''}`);
 
   // Re-derive brand/category from item names on every startup (fast, local only)
   const invCount = db.prepare(`SELECT COUNT(*) as c FROM invoices`).get()?.c || 0;

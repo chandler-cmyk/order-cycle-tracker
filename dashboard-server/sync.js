@@ -282,21 +282,28 @@ async function syncCreditNotes(token, deltaFilter) {
 // ── Sales return DB helpers ────────────────────────────────────────────────────
 const _upsertSalesReturn = db.prepare(`
   INSERT OR REPLACE INTO sales_returns
-    (salesreturn_id, salesreturn_number, customer_id, customer_name, date, status, shipping_state, invoice_id, last_modified_time)
-  VALUES (?,?,?,?,?,?,?,?,?)
+    (salesreturn_id, salesreturn_number, customer_id, customer_name, date, status, shipping_state, invoice_id, last_modified_time, linked_creditnote_sync_version)
+  VALUES (?,?,?,?,?,?,?,?,?,?)
 `);
 const _deleteSRItems = db.prepare(`DELETE FROM sales_return_items WHERE salesreturn_id = ?`);
 const _insertSRItem  = db.prepare(`
   INSERT INTO sales_return_items (salesreturn_id, item_id, sku, name, brand, category, quantity, item_total)
   VALUES (?,?,?,?,?,?,?,?)
 `);
+const _deleteSRLinkedCNs = db.prepare(`DELETE FROM sales_return_credit_notes WHERE salesreturn_id = ?`);
+const _insertSRLinkedCN  = db.prepare(`
+  INSERT OR REPLACE INTO sales_return_credit_notes (salesreturn_id, creditnote_id)
+  VALUES (?,?)
+`);
 
-const _saveSalesReturnTx = db.transaction((sr, lineItems) => {
+const _saveSalesReturnTx = db.transaction((sr, lineItems, linkedCreditNotes) => {
   _upsertSalesReturn.run(
     sr.salesreturn_id, sr.salesreturn_number, sr.customer_id, sr.customer_name,
-    sr.date, sr.status, sr.shipping_state, sr.invoice_id, sr.last_modified_time
+    sr.date, sr.status, sr.shipping_state, sr.invoice_id, sr.last_modified_time,
+    sr.linked_creditnote_sync_version
   );
   _deleteSRItems.run(sr.salesreturn_id);
+  _deleteSRLinkedCNs.run(sr.salesreturn_id);
   for (const li of lineItems) {
     _insertSRItem.run(
       sr.salesreturn_id, li.item_id || '', li.sku || '', li.name || '',
@@ -305,12 +312,16 @@ const _saveSalesReturnTx = db.transaction((sr, lineItems) => {
       parseFloat(li.item_total) || 0
     );
   }
+  for (const cn of linkedCreditNotes || []) {
+    if (cn?.creditnote_id) _insertSRLinkedCN.run(sr.salesreturn_id, cn.creditnote_id);
+  }
 });
 
 // ── Sales return sync ─────────────────────────────────────────────────────────
 async function syncSalesReturns(token, deltaFilter) {
   const _checkExistingSR = db.prepare(
-    `SELECT last_modified_time FROM sales_returns WHERE salesreturn_id = ?`
+    `SELECT last_modified_time, COALESCE(linked_creditnote_sync_version, 0) AS linked_creditnote_sync_version
+     FROM sales_returns WHERE salesreturn_id = ?`
   );
 
   let allSRs = [];
@@ -321,7 +332,8 @@ async function syncSalesReturns(token, deltaFilter) {
     url.searchParams.set('organization_id', ZOHO_ORG_ID);
     url.searchParams.set('per_page', '200');
     url.searchParams.set('page', String(page));
-    if (deltaFilter) url.searchParams.set('last_modified_time', toZohoTimestamp(deltaFilter));
+    // Always fetch the full SR list so linked credit note metadata can be backfilled
+    // even when an unchanged sales return has never been hydrated with its detail payload.
     const res = await fetchWithRetry(url.toString(), { Authorization: `Zoho-oauthtoken ${token}` });
     if (!res || !res.ok) {
       console.warn(`  ⚠️  Sales returns page ${page} failed: ${res?.status}`);
@@ -345,7 +357,11 @@ async function syncSalesReturns(token, deltaFilter) {
 
   for (const srSummary of allSRs) {
     const existing = _checkExistingSR.get(srSummary.salesreturn_id);
-    if (existing && existing.last_modified_time === srSummary.last_modified_time) {
+    if (
+      existing &&
+      existing.last_modified_time === srSummary.last_modified_time &&
+      existing.linked_creditnote_sync_version === 1
+    ) {
       skipped++;
       continue;
     }
@@ -376,8 +392,10 @@ async function syncSalesReturns(token, deltaFilter) {
           shipping_state:     shippingState,
           invoice_id:         sr.invoice_id || '',
           last_modified_time: sr.last_modified_time || '',
+          linked_creditnote_sync_version: 1,
         },
-        enrichedItems
+        enrichedItems,
+        Array.isArray(sr.creditnotes) ? sr.creditnotes : []
       );
       processed++;
     } catch (e) {

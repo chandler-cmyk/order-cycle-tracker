@@ -85,7 +85,9 @@ db.exec(`
     date               TEXT,
     status             TEXT,
     shipping_state     TEXT,
-    last_modified_time TEXT
+    invoice_id         TEXT,
+    last_modified_time TEXT,
+    linked_creditnote_sync_version INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS sales_return_items (
@@ -100,6 +102,12 @@ db.exec(`
     item_total       REAL DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS sales_return_credit_notes (
+    salesreturn_id TEXT NOT NULL,
+    creditnote_id  TEXT NOT NULL,
+    PRIMARY KEY (salesreturn_id, creditnote_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_cni_cn       ON credit_note_items(creditnote_id);
   CREATE INDEX IF NOT EXISTS idx_cn_date      ON credit_notes(date);
   CREATE INDEX IF NOT EXISTS idx_cn_customer  ON credit_notes(customer_id);
@@ -107,10 +115,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sr_date      ON sales_returns(date);
   CREATE INDEX IF NOT EXISTS idx_sr_customer  ON sales_returns(customer_id);
   CREATE INDEX IF NOT EXISTS idx_sr_status    ON sales_returns(status);
+  CREATE INDEX IF NOT EXISTS idx_srcn_sr      ON sales_return_credit_notes(salesreturn_id);
+  CREATE INDEX IF NOT EXISTS idx_srcn_cn      ON sales_return_credit_notes(creditnote_id);
 `);
 
 // Idempotent migrations — add columns that may not exist in older DBs
 try { db.exec(`ALTER TABLE credit_notes  ADD COLUMN invoice_id TEXT`); } catch (_) {}
 try { db.exec(`ALTER TABLE sales_returns ADD COLUMN invoice_id TEXT`); } catch (_) {}
+try { db.exec(`ALTER TABLE sales_returns ADD COLUMN linked_creditnote_sync_version INTEGER DEFAULT 0`); } catch (_) {}
 
 module.exports = db;
