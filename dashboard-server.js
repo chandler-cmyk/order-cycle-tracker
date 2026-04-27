@@ -67,8 +67,7 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD;
 const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12', 10);
 const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
 const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
-const includeSalesReturnsRaw = String(process.env.INCLUDE_SALES_RETURNS || 'true').toLowerCase();
-const INCLUDE_SALES_RETURNS = !['0', 'false', 'no'].includes(includeSalesReturnsRaw);
+const INCLUDE_SALES_RETURNS = true;
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -136,61 +135,6 @@ if (require('fs').existsSync(CLIENT_BUILD)) {
 }
 
 // ── Query filter builder ───────────────────────────────────────────────────────
-function docItemTotalSql(table, idColumn, docRef, alias) {
-  return `(SELECT ROUND(COALESCE(SUM(${alias}.item_total), 0), 2) FROM ${table} ${alias} WHERE ${alias}.${idColumn} = ${docRef})`;
-}
-
-function docItemCountSql(table, idColumn, docRef, alias) {
-  return `(SELECT COUNT(*) FROM ${table} ${alias} WHERE ${alias}.${idColumn} = ${docRef})`;
-}
-
-function docItemSignatureSql(table, idColumn, docRef, alias) {
-  return `(
-    SELECT COALESCE(GROUP_CONCAT(sig_part, '||'), '')
-    FROM (
-      SELECT printf('%s|%s|%.2f',
-        COALESCE(${alias}.name, ''),
-        TRIM(printf('%.10g', COALESCE(${alias}.quantity, 0))),
-        ROUND(COALESCE(${alias}.item_total, 0), 2)
-      ) AS sig_part
-      FROM ${table} ${alias}
-      WHERE ${alias}.${idColumn} = ${docRef}
-      ORDER BY COALESCE(${alias}.name, ''), COALESCE(${alias}.quantity, 0), ROUND(COALESCE(${alias}.item_total, 0), 2), ${alias}.id
-    )
-  )`;
-}
-
-function linkedCreditNoteExistsSql(srAlias = 'sr') {
-  return `EXISTS (
-    SELECT 1
-    FROM sales_return_credit_notes srcn
-    JOIN credit_notes cn_link ON cn_link.creditnote_id = srcn.creditnote_id
-    WHERE srcn.salesreturn_id = ${srAlias}.salesreturn_id
-      AND cn_link.status NOT IN ('void','draft')
-  )`;
-}
-
-function exactCreditNoteFallbackExistsSql(srAlias = 'sr') {
-  const customerMatch = `(
-    (COALESCE(${srAlias}.customer_id, '') <> '' AND cn_match.customer_id = ${srAlias}.customer_id)
-    OR
-    (COALESCE(${srAlias}.customer_id, '') = '' AND cn_match.customer_name = ${srAlias}.customer_name)
-  )`;
-  return `EXISTS (
-    SELECT 1
-    FROM credit_notes cn_match
-    WHERE cn_match.status NOT IN ('void','draft')
-      AND ABS(JULIANDAY(cn_match.date) - JULIANDAY(${srAlias}.date)) <= 14
-      AND ${customerMatch}
-      AND ${docItemTotalSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_total')} =
-          ${docItemTotalSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_total')}
-      AND ${docItemCountSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_count')} =
-          ${docItemCountSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_count')}
-      AND ${docItemSignatureSql('credit_note_items', 'creditnote_id', 'cn_match.creditnote_id', 'cni_sig')} =
-          ${docItemSignatureSql('sales_return_items', 'salesreturn_id', `${srAlias}.salesreturn_id`, 'sri_sig')}
-  )`;
-}
-
 function buildWhereClause(query) {
   const { start, end, brands, categories, sku } = query;
   const s = start || '2000-01-01';
@@ -210,11 +154,6 @@ function buildWhereClause(query) {
   const srCond   = [
     `sr.date BETWEEN ? AND ?`,
     `sr.status NOT IN ('void','draft')`,
-    `NOT ${linkedCreditNoteExistsSql('sr')}`,
-    `NOT (
-      COALESCE(sr.linked_creditnote_sync_version, 0) = 0
-      AND ${exactCreditNoteFallbackExistsSql('sr')}
-    )`,
   ];
   const srParams = [s, e];
 
@@ -1059,7 +998,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       return sum;
     }, { seen: new Set(), total: 0 });
 
-    const srApplied = INCLUDE_SALES_RETURNS ? srTotal.total - linkedSrDeduction.total : 0;
+    const srApplied = INCLUDE_SALES_RETURNS ? srTotal.total : 0;
 
     res.json({
       period: { start: s, end: e },
@@ -1071,7 +1010,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       srDeduction:       Math.round(srTotal.total * 100) / 100,
       srDeductionApplied: Math.round(srApplied * 100) / 100,
       srCount:           srTotal.count,
-      srLinkedCnDeductionExcluded: Math.round(linkedSrDeduction.total * 100) / 100,
+      srLinkedCnAlsoPresentTotal: Math.round(linkedSrDeduction.total * 100) / 100,
       netRevenue:        Math.round((invoiceTotal.total - cnTotal.total - srApplied) * 100) / 100,
       srWithLinkedCn:    linkedSrDeduction.seen.size,
       srCnOverlap:       srWithLinkedCn,
@@ -1091,7 +1030,7 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Sales Dashboard API on http://localhost:${PORT}`);
   console.log(`   SQLite DB:  data/invoices.db`);
   console.log(`   Frontend:   http://localhost:3003 (run: cd dashboard-client && npm start)\n`);
-  console.log(`   Revenue model: invoices - credit notes${INCLUDE_SALES_RETURNS ? ' - unmatched sales returns' : ''}`);
+  console.log(`   Revenue model: invoices - credit notes${INCLUDE_SALES_RETURNS ? ' - sales returns' : ''}`);
 
   // Re-derive brand/category from item names on every startup (fast, local only)
   const invCount = db.prepare(`SELECT COUNT(*) as c FROM invoices`).get()?.c || 0;
