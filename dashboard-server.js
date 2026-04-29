@@ -67,7 +67,7 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD;
 const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12', 10);
 const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
 const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
-const INCLUDE_SALES_RETURNS = true;
+const INCLUDE_SALES_RETURNS = false;
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -144,13 +144,11 @@ function buildWhereClause(query) {
   const invCond   = [`i.date BETWEEN ? AND ?`, `i.status NOT IN ('void','draft')`];
   const invParams = [s, e];
 
-  // Credit note side — filter by the CN's own date (matching Zoho's methodology).
-  // Draft CNs are excluded as they are not finalized/applied in Zoho reports.
-  const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft')`];
+  // Credit note side: Sales by Item includes open/closed CNs, not approved drafts.
+  const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft','approved')`];
   const cnParams = [s, e];
 
-  // Sales return side — subtract returned units/revenue, same date-window logic.
-  // Do not fuzzy-dedupe against credit notes; it can under-deduct and drift from Zoho report totals.
+  // Sales returns are available for diagnostics, but Sales by Item does not subtract them separately.
   const srCond   = [
     `sr.date BETWEEN ? AND ?`,
     `sr.status NOT IN ('void','draft')`,
@@ -191,14 +189,14 @@ function buildWhereClause(query) {
   };
 }
 
-// Convenience: params for a 3-leg revenue UNION (invoices + CNs + SRs)
+// Convenience: params for the revenue UNION.
 function unionParams(w) {
   return INCLUDE_SALES_RETURNS
     ? [...w.params, ...w.cnParams, ...w.srParams]
     : [...w.params, ...w.cnParams];
 }
 
-// 3-leg revenue UNION — invoices positive, credit notes and sales returns negative.
+// Revenue UNION: invoices positive, credit notes negative; sales returns are optional diagnostics.
 function revenueUnion(w, invFields, cnFields, srFields) {
   const srLeg = INCLUDE_SALES_RETURNS
     ? `
@@ -212,6 +210,19 @@ function revenueUnion(w, invFields, cnFields, srFields) {
     SELECT ${cnFields} FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id WHERE ${w.cnWhere}
     ${srLeg}
   )`;
+}
+
+function invoiceSubtotalExpr(invAlias = 'i') {
+  return `(SELECT COALESCE(SUM(li_sub.item_total), 0) FROM line_items li_sub WHERE li_sub.invoice_id = ${invAlias}.invoice_id)`;
+}
+
+function invoiceDiscountAllocationExpr(invAlias = 'i', liAlias = 'li') {
+  const subtotal = invoiceSubtotalExpr(invAlias);
+  return `CASE WHEN COALESCE(${invAlias}.discount_total, 0) > 0 AND ${subtotal} > 0 THEN COALESCE(${invAlias}.discount_total, 0) * ${liAlias}.item_total / ${subtotal} ELSE 0 END`;
+}
+
+function invoiceNetAmountExpr(invAlias = 'i', liAlias = 'li') {
+  return `(${liAlias}.item_total - ${invoiceDiscountAllocationExpr(invAlias, liAlias)})`;
 }
 
 
@@ -260,7 +271,7 @@ function getMetrics(w) {
   const revRow = db.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS totalRevenue, COALESCE(SUM(qty), 0) AS unitsSold
     FROM ${revenueUnion(w,
-      'li.item_total AS amount, li.quantity AS qty',
+      `${invoiceNetAmountExpr()} AS amount, li.quantity AS qty`,
       '-cni.item_total AS amount, -cni.quantity AS qty',
       '-sri.item_total AS amount, -sri.quantity AS qty'
     )} rev
@@ -335,7 +346,7 @@ app.get('/api/dashboard/trend', (req, res) => {
         SUM(amount)        AS revenue,
         COUNT(DISTINCT inv_id) AS orderCount
       FROM ${revenueUnion(w,
-        'i.date AS raw_date, li.item_total AS amount, i.invoice_id AS inv_id',
+        `i.date AS raw_date, ${invoiceNetAmountExpr()} AS amount, i.invoice_id AS inv_id`,
         'cn.date AS raw_date, -cni.item_total AS amount, NULL AS inv_id',
         'sr.date AS raw_date, -sri.item_total AS amount, NULL AS inv_id'
       )} trend
@@ -359,7 +370,7 @@ app.get('/api/dashboard/states', (req, res) => {
     const rows = db.prepare(`
       SELECT
         i.shipping_state             AS state,
-        COALESCE(SUM(li.item_total), 0) AS revenue,
+        COALESCE(SUM(${invoiceNetAmountExpr()}), 0) AS revenue,
         COUNT(DISTINCT i.invoice_id) AS orderCount
       FROM invoices i
       JOIN line_items li ON i.invoice_id = li.invoice_id
@@ -388,9 +399,9 @@ app.get('/api/dashboard/products', (req, res) => {
     const pageSize = Number.isFinite(parsedPageSize) ? Math.min(100, Math.max(1, parsedPageSize)) : 25;
     const offset   = (page - 1) * pageSize;
 
-    // Net revenue and units per product — invoices minus credit notes; units also minus sales returns
+    // Net revenue and units per product using Sales by Item methodology.
     const netUnion = revenueUnion(w,
-      'li.sku AS sku, li.name AS name, li.brand AS brand, li.category AS cat, li.item_total AS amount, li.quantity AS qty',
+      `li.sku AS sku, li.name AS name, li.brand AS brand, li.category AS cat, ${invoiceNetAmountExpr()} AS amount, li.quantity AS qty`,
       'cni.sku AS sku, cni.name AS name, cni.brand AS brand, cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
       'sri.sku AS sku, sri.name AS name, sri.brand AS brand, sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
     );
@@ -434,7 +445,7 @@ app.get('/api/dashboard/categories', (req, res) => {
   try {
     const w = buildWhereClause(req.query);
     const netUnion = revenueUnion(w,
-      'li.category AS cat, li.item_total AS amount, li.quantity AS qty',
+      `li.category AS cat, ${invoiceNetAmountExpr()} AS amount, li.quantity AS qty`,
       'cni.category AS cat, -cni.item_total AS amount, -cni.quantity AS qty',
       'sri.category AS cat, -sri.item_total AS amount, -sri.quantity AS qty'
     );
@@ -471,7 +482,7 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
       const summary = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(qty), 0) AS units
         FROM ${revenueUnion(w,
-          'li.item_total AS amount, li.quantity AS qty',
+          `${invoiceNetAmountExpr()} AS amount, li.quantity AS qty`,
           '-cni.item_total AS amount, -cni.quantity AS qty',
           '-sri.item_total AS amount, -sri.quantity AS qty'
         )} s
@@ -484,7 +495,7 @@ app.get('/api/dashboard/brand-comparison', (req, res) => {
       const trend = db.prepare(`
         SELECT ${dateFmt} AS period, SUM(amount) AS revenue
         FROM ${revenueUnion(w,
-          'i.date AS raw_date, li.item_total AS amount',
+          `i.date AS raw_date, ${invoiceNetAmountExpr()} AS amount`,
           'cn.date AS raw_date, -cni.item_total AS amount',
           'sr.date AS raw_date, -sri.item_total AS amount'
         )} t
@@ -515,7 +526,7 @@ app.get('/api/dashboard/customers', (req, res) => {
   try {
     const w = buildWhereClause(req.query);
     const custUnion = revenueUnion(w,
-      'i.customer_id AS cid, i.customer_name AS cname, li.item_total AS amount, i.invoice_id AS inv_id',
+      `i.customer_id AS cid, i.customer_name AS cname, ${invoiceNetAmountExpr()} AS amount, i.invoice_id AS inv_id`,
       'cn.customer_id AS cid, cn.customer_name AS cname, -cni.item_total AS amount, NULL AS inv_id',
       'sr.customer_id AS cid, sr.customer_name AS cname, -sri.item_total AS amount, NULL AS inv_id'
     );
@@ -560,55 +571,45 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
     const s = req.query.start || '2000-01-01';
     const e = req.query.end   || '2099-12-31';
 
-    // Net revenue over time (invoices minus credit notes and sales returns by document date)
+    // Net revenue over time using Zoho Sales by Item methodology.
     const trend = db.prepare(`
       SELECT raw_date AS date, COALESCE(SUM(amount), 0) AS revenue
       FROM (
-        SELECT i.date AS raw_date, li.item_total AS amount
+        SELECT i.date AS raw_date, ${invoiceNetAmountExpr()} AS amount
         FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE i.customer_id = ? AND i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft')
         UNION ALL
         SELECT cn.date AS raw_date, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
-        UNION ALL
-        SELECT sr.date AS raw_date, -sri.item_total AS amount
-        FROM sales_returns sr
-        JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
-        WHERE sr.customer_id = ? AND sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
       )
       GROUP BY raw_date ORDER BY raw_date ASC
-    `).all([customerId, s, e, customerId, s, e, customerId, s, e]);
+    `).all([customerId, s, e, customerId, s, e]);
 
-    // Top SKUs net of returns
+    // Top SKUs net of Sales by Item credit notes.
     const topSkus = db.prepare(`
       SELECT sku, name, brand, category,
         COALESCE(SUM(qty), 0)    AS units,
         COALESCE(SUM(amount), 0) AS revenue
       FROM (
-        SELECT li.sku, li.name, li.brand, li.category, li.quantity AS qty, li.item_total AS amount
+        SELECT li.sku, li.name, li.brand, li.category, li.quantity AS qty, ${invoiceNetAmountExpr()} AS amount
         FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE i.customer_id = ? AND i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft')
         UNION ALL
         SELECT cni.sku, cni.name, cni.brand, cni.category, -cni.quantity AS qty, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
-        UNION ALL
-        SELECT sri.sku, sri.name, sri.brand, sri.category, -sri.quantity AS qty, -sri.item_total AS amount
-        FROM sales_returns sr
-        JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
-        WHERE sr.customer_id = ? AND sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
       )
       GROUP BY sku, name, brand, category
       ORDER BY revenue DESC LIMIT 10
-    `).all([customerId, s, e, customerId, s, e, customerId, s, e]);
+    `).all([customerId, s, e, customerId, s, e]);
 
     // Invoice history
     const invoices = db.prepare(`
       SELECT i.invoice_id, i.invoice_number, i.date, i.status,
-        COALESCE(SUM(li.item_total), 0) AS total
+        COALESCE(SUM(${invoiceNetAmountExpr()}), 0) AS total
       FROM invoices i
       LEFT JOIN line_items li ON i.invoice_id = li.invoice_id
       WHERE i.customer_id = ? AND i.date BETWEEN ? AND ?
@@ -660,7 +661,7 @@ app.get('/api/dashboard/state-customers', (req, res) => {
         i.customer_id,
         i.customer_name,
         COUNT(DISTINCT i.invoice_id) AS orderCount,
-        COALESCE(SUM(li.item_total), 0) AS revenue
+        COALESCE(SUM(${invoiceNetAmountExpr()}), 0) AS revenue
       FROM invoices i
       JOIN line_items li ON i.invoice_id = li.invoice_id
       WHERE ${w.where} AND i.shipping_state = ?
@@ -686,7 +687,7 @@ app.get('/api/dashboard/state-products', (req, res) => {
     const unions = [
       {
         sql: `
-        SELECT li.name, li.sku, li.quantity AS qty, li.item_total AS amount
+        SELECT li.name, li.sku, li.quantity AS qty, ${invoiceNetAmountExpr()} AS amount
         FROM invoices i
         JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE ${invWhere}
@@ -857,7 +858,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
       SELECT period, SUM(revenue) AS revenue, SUM(orders) AS orders, SUM(units) AS units
       FROM (
         SELECT strftime('%Y-%m', i.date) AS period,
-               SUM(li.item_total) AS revenue,
+               SUM(${invoiceNetAmountExpr()}) AS revenue,
                COUNT(DISTINCT i.invoice_id) AS orders,
                SUM(li.quantity) AS units
         FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
@@ -867,13 +868,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
         SELECT strftime('%Y-%m', cn.date) AS period,
                -SUM(cni.item_total) AS revenue, 0 AS orders, -SUM(cni.quantity) AS units
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.status NOT IN ('void','draft')
-        GROUP BY period
-        UNION ALL
-        SELECT strftime('%Y-%m', sr.date) AS period,
-               -SUM(sri.item_total) AS revenue, 0 AS orders, -SUM(sri.quantity) AS units
-        FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
-        WHERE sr.status NOT IN ('void','draft')
+        WHERE cn.status NOT IN ('void','draft','approved')
         GROUP BY period
       )
       GROUP BY period ORDER BY period ASC
@@ -914,20 +909,15 @@ app.get('/api/dashboard/forecast', (req, res) => {
     const catRows = db.prepare(`
       SELECT period, category, SUM(revenue) AS revenue
       FROM (
-        SELECT strftime('%Y-%m', i.date) AS period, li.category, SUM(li.item_total) AS revenue
+        SELECT strftime('%Y-%m', i.date) AS period, li.category, SUM(${invoiceNetAmountExpr()}) AS revenue
         FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE i.status NOT IN ('void','draft') AND li.category != ''
         GROUP BY period, li.category
         UNION ALL
         SELECT strftime('%Y-%m', cn.date) AS period, cni.category, -SUM(cni.item_total) AS revenue
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.status NOT IN ('void','draft') AND cni.category != ''
+        WHERE cn.status NOT IN ('void','draft','approved') AND cni.category != ''
         GROUP BY period, cni.category
-        UNION ALL
-        SELECT strftime('%Y-%m', sr.date) AS period, sri.category, -SUM(sri.item_total) AS revenue
-        FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
-        WHERE sr.status NOT IN ('void','draft') AND sri.category != ''
-        GROUP BY period, sri.category
       )
       GROUP BY period, category ORDER BY period ASC
     `).all();
@@ -961,15 +951,18 @@ app.get('/api/dashboard/forecast', (req, res) => {
 
 // ── Diagnostic: revenue breakdown ─────────────────────────────────────────────
 // GET /api/dashboard/revenue-debug?start=&end=
-// Shows invoice total, CN total, SR total, and which SRs are excluded because
-// Zoho also linked them to finalized credit notes.
+// Shows the Sales by Item revenue bridge: invoice item subtotal - discounts - open/closed CNs.
 app.get('/api/dashboard/revenue-debug', (req, res) => {
   try {
     const s = req.query.start || '2000-01-01';
     const e = req.query.end   || '2099-12-31';
 
     const invoiceTotal = db.prepare(`
-      SELECT COALESCE(SUM(li.item_total), 0) AS total, COUNT(DISTINCT i.invoice_id) AS count
+      SELECT
+        COALESCE(SUM(li.item_total), 0) AS itemSubtotal,
+        COALESCE(SUM(${invoiceDiscountAllocationExpr()}), 0) AS discountTotal,
+        COALESCE(SUM(${invoiceNetAmountExpr()}), 0) AS total,
+        COUNT(DISTINCT i.invoice_id) AS count
       FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
       WHERE i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft')
     `).get([s, e]);
@@ -977,7 +970,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
     const cnTotal = db.prepare(`
       SELECT COALESCE(SUM(cni.item_total), 0) AS total, COUNT(DISTINCT cn.creditnote_id) AS count
       FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-      WHERE cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
+      WHERE cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
     `).get([s, e]);
 
     const srTotal = db.prepare(`
@@ -1005,7 +998,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       JOIN sales_return_credit_notes srcn ON srcn.salesreturn_id = sr.salesreturn_id
       JOIN credit_notes cn ON cn.creditnote_id = srcn.creditnote_id
       WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
-        AND cn.status NOT IN ('void','draft')
+        AND cn.status NOT IN ('void','draft','approved')
       GROUP BY sr.salesreturn_id, cn.creditnote_id
       ORDER BY sr.date DESC, cn.date DESC
     `).all([s, e]);
@@ -1022,6 +1015,8 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
     res.json({
       period: { start: s, end: e },
       includeSalesReturns: INCLUDE_SALES_RETURNS,
+      invoiceItemSubtotal: Math.round(invoiceTotal.itemSubtotal * 100) / 100,
+      invoiceDiscount:   Math.round(invoiceTotal.discountTotal * 100) / 100,
       invoiceTotal:      Math.round(invoiceTotal.total * 100) / 100,
       invoiceCount:      invoiceTotal.count,
       cnDeduction:       Math.round(cnTotal.total * 100) / 100,

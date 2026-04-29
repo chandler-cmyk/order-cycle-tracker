@@ -20,7 +20,9 @@ db.exec(`
     date               TEXT,
     status             TEXT,
     shipping_state     TEXT,
-    last_modified_time TEXT
+    last_modified_time TEXT,
+    discount_total     REAL DEFAULT 0,
+    sales_by_item_sync_version INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS line_items (
@@ -123,5 +125,7 @@ db.exec(`
 try { db.exec(`ALTER TABLE credit_notes  ADD COLUMN invoice_id TEXT`); } catch (_) {}
 try { db.exec(`ALTER TABLE sales_returns ADD COLUMN invoice_id TEXT`); } catch (_) {}
 try { db.exec(`ALTER TABLE sales_returns ADD COLUMN linked_creditnote_sync_version INTEGER DEFAULT 0`); } catch (_) {}
+try { db.exec(`ALTER TABLE invoices ADD COLUMN discount_total REAL DEFAULT 0`); } catch (_) {}
+try { db.exec(`ALTER TABLE invoices ADD COLUMN sales_by_item_sync_version INTEGER DEFAULT 0`); } catch (_) {}
 
 module.exports = db;

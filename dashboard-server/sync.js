@@ -6,6 +6,7 @@ const { inferBrandCategory } = require('./categorize');
 const { ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID } = process.env;
 const BASE = 'https://www.zohoapis.com/inventory/v1';
 const REQUEST_DELAY_MS = 300; // 300ms between requests → ~200 req/min, well within Zoho limits
+const SALES_BY_ITEM_SYNC_VERSION = 1;
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const syncState = {
@@ -136,11 +137,33 @@ async function fetchInvoiceDetail(token, invoiceId) {
   return res.json();
 }
 
+function toNumber(value) {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundCents(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function inferInvoiceDiscount(inv, lineItems = []) {
+  const explicit = toNumber(inv.discount_total ?? inv.discount_amount);
+  if (explicit > 0) return roundCents(explicit);
+
+  const lineSubtotal = lineItems.reduce((sum, li) => sum + toNumber(li.item_total), 0);
+  const total = toNumber(inv.total);
+  const shipping = toNumber(inv.shipping_charge);
+  const adjustment = toNumber(inv.adjustment);
+  const tax = toNumber(inv.tax_total ?? inv.taxes_total);
+  const inferred = lineSubtotal + shipping + adjustment + tax - total;
+  return inferred > 0.005 ? roundCents(inferred) : 0;
+}
+
 // ── DB upsert (within a transaction) ──────────────────────────────────────────
 const _upsertInvoice = db.prepare(`
   INSERT OR REPLACE INTO invoices
-    (invoice_id, invoice_number, customer_id, customer_name, date, status, shipping_state, last_modified_time)
-  VALUES (?,?,?,?,?,?,?,?)
+    (invoice_id, invoice_number, customer_id, customer_name, date, status, shipping_state, last_modified_time, discount_total, sales_by_item_sync_version)
+  VALUES (?,?,?,?,?,?,?,?,?,?)
 `);
 const _deleteLineItems = db.prepare(`DELETE FROM line_items WHERE invoice_id = ?`);
 const _insertLineItem  = db.prepare(`
@@ -155,7 +178,8 @@ const _upsertCustomer = db.prepare(`
 const _saveInvoiceTx = db.transaction((inv, lineItems) => {
   _upsertInvoice.run(
     inv.invoice_id, inv.invoice_number, inv.customer_id, inv.customer_name,
-    inv.date, inv.status, inv.shipping_state, inv.last_modified_time
+    inv.date, inv.status, inv.shipping_state, inv.last_modified_time,
+    toNumber(inv.discount_total), inv.sales_by_item_sync_version || SALES_BY_ITEM_SYNC_VERSION
   );
   if (inv.customer_id) _upsertCustomer.run(inv.customer_id, inv.customer_name || '');
   _deleteLineItems.run(inv.invoice_id);
@@ -408,6 +432,104 @@ async function syncSalesReturns(token, deltaFilter) {
   console.log(`  ✅ Sales returns: ${processed} saved, ${skipped} skipped, ${failed} failed`);
 }
 
+// ── Invoice discount backfill ──────────────────────────────────────────────────
+async function backfillSalesByItemInvoiceDiscounts(token) {
+  const missing = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM invoices
+    WHERE COALESCE(sales_by_item_sync_version, 0) <> ?
+  `).get(SALES_BY_ITEM_SYNC_VERSION);
+
+  if (!missing?.count) {
+    console.log(`  ✅ Invoice discount metadata is current`);
+    return;
+  }
+
+  console.log(`  🔄 Backfilling Sales by Item invoice discounts for ${missing.count} invoices...`);
+
+  const existingInvoice = db.prepare(`
+    SELECT COALESCE(sales_by_item_sync_version, 0) AS version
+    FROM invoices
+    WHERE invoice_id = ?
+  `);
+  const invoiceLineSubtotal = db.prepare(`
+    SELECT COALESCE(SUM(item_total), 0) AS subtotal
+    FROM line_items
+    WHERE invoice_id = ?
+  `);
+  const updateInvoiceDiscount = db.prepare(`
+    UPDATE invoices
+    SET discount_total = ?, sales_by_item_sync_version = ?
+    WHERE invoice_id = ?
+  `);
+  const markInvoiceUnavailable = db.prepare(`
+    UPDATE invoices
+    SET status = 'void', discount_total = 0, sales_by_item_sync_version = ?
+    WHERE invoice_id = ?
+  `);
+
+  let page = 1;
+  let hasMore = true;
+  let updated = 0;
+  let skipped = 0;
+
+  while (hasMore) {
+    const data = await fetchInvoicePage(token, page, null);
+    const invoices = data.invoices || [];
+
+    for (const inv of invoices) {
+      const existing = existingInvoice.get(inv.invoice_id);
+      if (!existing) continue;
+      if (existing.version === SALES_BY_ITEM_SYNC_VERSION) {
+        skipped++;
+        continue;
+      }
+
+      const lineSubtotal = invoiceLineSubtotal.get(inv.invoice_id)?.subtotal || 0;
+      const inferredDiscount = lineSubtotal
+        + toNumber(inv.shipping_charge)
+        + toNumber(inv.adjustment)
+        + toNumber(inv.tax_total ?? inv.taxes_total)
+        - toNumber(inv.total);
+      const discount = inferredDiscount > 0.005 ? roundCents(inferredDiscount) : 0;
+      updateInvoiceDiscount.run(discount, SALES_BY_ITEM_SYNC_VERSION, inv.invoice_id);
+      updated++;
+    }
+
+    hasMore = data.page_context?.has_more_page || false;
+    console.log(`  📄 Discount backfill page ${page}: ${updated} updated, ${skipped} already current`);
+    page++;
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  const remaining = db.prepare(`
+    SELECT invoice_id
+    FROM invoices
+    WHERE COALESCE(sales_by_item_sync_version, 0) <> ?
+  `).all(SALES_BY_ITEM_SYNC_VERSION);
+
+  for (const row of remaining) {
+    const detail = await fetchInvoiceDetail(token, row.invoice_id);
+    const inv = detail?.invoice;
+    if (!inv) {
+      markInvoiceUnavailable.run(SALES_BY_ITEM_SYNC_VERSION, row.invoice_id);
+      updated++;
+      await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+      continue;
+    }
+    const lineItems = Array.isArray(inv.line_items) ? inv.line_items : [];
+    updateInvoiceDiscount.run(
+      inferInvoiceDiscount(inv, lineItems),
+      SALES_BY_ITEM_SYNC_VERSION,
+      row.invoice_id
+    );
+    updated++;
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  console.log(`  ✅ Invoice discount backfill complete: ${updated} updated`);
+}
+
 // ── Core sync logic ────────────────────────────────────────────────────────────
 async function startSync() {
   if (syncState.syncing) {
@@ -461,7 +583,7 @@ async function startSync() {
     // Skip invoices already in DB with the same last_modified_time so interrupted
     // syncs can be safely restarted without re-fetching everything.
     const _checkExisting = db.prepare(
-      `SELECT last_modified_time FROM invoices WHERE invoice_id = ?`
+      `SELECT last_modified_time, COALESCE(sales_by_item_sync_version, 0) AS sales_by_item_sync_version FROM invoices WHERE invoice_id = ?`
     );
 
     let processed = 0;
@@ -474,7 +596,11 @@ async function startSync() {
 
       // Skip if already stored with the same modification timestamp
       const existing = _checkExisting.get(invSummary.invoice_id);
-      if (existing && existing.last_modified_time === invSummary.last_modified_time) {
+      if (
+        existing &&
+        existing.last_modified_time === invSummary.last_modified_time &&
+        existing.sales_by_item_sync_version === SALES_BY_ITEM_SYNC_VERSION
+      ) {
         skipped++;
         if (skipped % 50 === 0) console.log(`  ⏭  Skipped ${skipped} already-current invoices...`);
         continue;
@@ -506,6 +632,8 @@ async function startSync() {
             status:             (inv.status || '').toLowerCase(),
             shipping_state:     shippingState,
             last_modified_time: inv.last_modified_time || '',
+            discount_total:     inferInvoiceDiscount(inv, lineItems),
+            sales_by_item_sync_version: SALES_BY_ITEM_SYNC_VERSION,
           },
           enrichedItems
         );
@@ -536,6 +664,10 @@ async function startSync() {
     console.log(`\n🔄 Syncing sales returns...`);
     const srToken = await getAccessToken();
     await syncSalesReturns(srToken, deltaFilter);
+
+    console.log(`\nChecking invoice discount metadata...`);
+    const discountToken = await getAccessToken();
+    await backfillSalesByItemInvoiceDiscounts(discountToken);
 
     // ── Phase 5: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
