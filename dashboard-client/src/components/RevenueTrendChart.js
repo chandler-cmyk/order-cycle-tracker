@@ -1,39 +1,48 @@
 import { useState } from 'react';
 import {
   ResponsiveContainer, XAxis, YAxis,
-  CartesianGrid, Tooltip, Area, AreaChart,
+  CartesianGrid, Tooltip, Area, AreaChart, Line,
 } from 'recharts';
 import { C, fmtCurrency, fmtDate } from '../utils';
+
+const PRIOR_COLOR = '#94a3b8';
 
 function formatPeriod(period, group) {
   if (!period) return '';
   if (group === 'weekly') {
-    // period is "YYYY-WW"
     const [year, week] = period.split('-');
     return `Wk ${week} '${String(year).slice(2)}`;
   }
-  // daily: YYYY-MM-DD
   const d = new Date(period + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-const CustomTooltip = ({ active, payload, label, group }) => {
+const CustomTooltip = ({ active, payload, label, group, showPrior }) => {
   if (!active || !payload?.length) return null;
+  const cur  = payload.find(p => p.dataKey === 'revenue');
+  const prev = payload.find(p => p.dataKey === 'priorRevenue');
   return (
     <div style={{
       background: C.surface, border: `1px solid ${C.border}`,
       borderRadius: 8, padding: '10px 14px',
       boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
     }}>
-      <div style={{ fontSize: 12, color: C.textMute, marginBottom: 4 }}>
-        {group === 'weekly' ? label : fmtDate(payload[0]?.payload?.period)}
+      <div style={{ fontSize: 12, color: C.textMute, marginBottom: 6 }}>
+        {group === 'weekly' ? label : fmtDate(cur?.payload?.period)}
       </div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.accent }}>
-        {fmtCurrency(payload[0]?.value)}
-      </div>
-      {payload[1] && (
+      {cur && (
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.accent }}>
+          {fmtCurrency(cur.value)}
+        </div>
+      )}
+      {showPrior && prev && prev.value != null && (
+        <div style={{ fontSize: 12, color: PRIOR_COLOR, marginTop: 3 }}>
+          Prior year: {fmtCurrency(prev.value)}
+        </div>
+      )}
+      {cur?.payload?.orderCount > 0 && (
         <div style={{ fontSize: 11, color: C.textMute, marginTop: 2 }}>
-          {payload[1]?.value?.toLocaleString()} orders
+          {cur.payload.orderCount.toLocaleString()} orders
         </div>
       )}
     </div>
@@ -41,10 +50,18 @@ const CustomTooltip = ({ active, payload, label, group }) => {
 };
 
 export default function RevenueTrendChart({ data, loading, group, onGroupChange }) {
-  const chartData = (data || []).map(d => ({
+  const [showPrior, setShowPrior] = useState(true);
+
+  const current = data?.current || (Array.isArray(data) ? data : []);
+  const prior   = data?.prior   || [];
+
+  const chartData = current.map((d, i) => ({
     ...d,
     label: formatPeriod(d.period, group),
+    priorRevenue: prior[i]?.revenue ?? null,
   }));
+
+  const hasPrior = prior.length > 0 && prior.some(r => r.revenue > 0);
 
   return (
     <div style={{
@@ -53,11 +70,32 @@ export default function RevenueTrendChart({ data, loading, group, onGroupChange 
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Revenue Trend</div>
-          <div style={{ fontSize: 12, color: C.textMute, marginTop: 2 }}>
-            {chartData.length} {group === 'weekly' ? 'weeks' : 'days'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Revenue Trend</div>
+            <div style={{ fontSize: 12, color: C.textMute, marginTop: 2 }}>
+              {chartData.length} {group === 'weekly' ? 'weeks' : 'days'}
+            </div>
           </div>
+          {hasPrior && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 24, height: 2.5, background: C.accent, display: 'inline-block', borderRadius: 2 }} />
+                <span style={{ color: C.textSub }}>This period</span>
+              </span>
+              <button
+                onClick={() => setShowPrior(p => !p)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  opacity: showPrior ? 1 : 0.45,
+                }}
+              >
+                <span style={{ width: 24, height: 2, background: PRIOR_COLOR, display: 'inline-block', borderRadius: 2, borderTop: `2px dashed ${PRIOR_COLOR}` }} />
+                <span style={{ color: C.textMute, fontSize: 12 }}>Prior year</span>
+              </button>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {['daily', 'weekly'].map(g => (
@@ -109,7 +147,19 @@ export default function RevenueTrendChart({ data, loading, group, onGroupChange 
               tickLine={false}
               width={72}
             />
-            <Tooltip content={<CustomTooltip group={group} />} />
+            <Tooltip content={<CustomTooltip group={group} showPrior={showPrior} />} />
+            {hasPrior && showPrior && (
+              <Line
+                type="monotone"
+                dataKey="priorRevenue"
+                stroke={PRIOR_COLOR}
+                strokeWidth={1.5}
+                strokeDasharray="5 3"
+                dot={false}
+                activeDot={false}
+                connectNulls
+              />
+            )}
             <Area
               type="monotone"
               dataKey="revenue"

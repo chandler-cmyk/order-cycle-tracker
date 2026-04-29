@@ -337,13 +337,12 @@ app.get('/api/dashboard/outstanding', (req, res) => {
 app.get('/api/dashboard/trend', (req, res) => {
   try {
     const group = req.query.group === 'weekly' ? 'weekly' : 'daily';
-    const w = buildWhereClause(req.query);
     const dateFmt = group === 'weekly' ? `strftime('%Y-%W', raw_date)` : `raw_date`;
 
-    const rows = db.prepare(`
+    const makeTrendSql = (w) => `
       SELECT
-        ${dateFmt}         AS period,
-        SUM(amount)        AS revenue,
+        ${dateFmt}             AS period,
+        SUM(amount)            AS revenue,
         COUNT(DISTINCT inv_id) AS orderCount
       FROM ${revenueUnion(w,
         `i.date AS raw_date, ${invoiceNetAmountExpr()} AS amount, i.invoice_id AS inv_id`,
@@ -352,8 +351,65 @@ app.get('/api/dashboard/trend', (req, res) => {
       )} trend
       GROUP BY period
       ORDER BY period ASC
-    `).all(unionParams(w));
+    `;
 
+    const w    = buildWhereClause(req.query);
+    const wPrev = buildWhereClause({
+      ...req.query,
+      start: req.query.start ? shiftDate(req.query.start, -365) : req.query.start,
+      end:   req.query.end   ? shiftDate(req.query.end,   -365) : req.query.end,
+    });
+
+    const current = db.prepare(makeTrendSql(w)).all(unionParams(w));
+    const prior   = db.prepare(makeTrendSql(wPrev)).all(unionParams(wPrev));
+
+    res.json({ current, prior });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dashboard/brand-breakdown?start=&end=&brands=&categories=&sku=
+app.get('/api/dashboard/brand-breakdown', (req, res) => {
+  try {
+    const w = buildWhereClause(req.query);
+    const rows = db.prepare(`
+      SELECT
+        brand,
+        COALESCE(SUM(amount), 0) AS revenue,
+        COALESCE(SUM(qty),    0) AS units
+      FROM ${revenueUnion(w,
+        `li.brand AS brand, ${invoiceNetAmountExpr()} AS amount, li.quantity AS qty`,
+        'cni.brand AS brand, -cni.item_total AS amount, -cni.quantity AS qty',
+        'sri.brand AS brand, -sri.item_total AS amount, -sri.quantity AS qty'
+      )} bd
+      WHERE brand != ''
+      GROUP BY brand
+      ORDER BY revenue DESC
+    `).all(unionParams(w));
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dashboard/monthly?brands=&categories=&sku=  (no date range — all-time)
+app.get('/api/dashboard/monthly', (req, res) => {
+  try {
+    const w = buildWhereClause({ brands: req.query.brands, categories: req.query.categories, sku: req.query.sku });
+    const rows = db.prepare(`
+      SELECT
+        strftime('%Y-%m', raw_date) AS month,
+        SUM(amount)                 AS revenue,
+        COUNT(DISTINCT inv_id)      AS orders
+      FROM ${revenueUnion(w,
+        `i.date AS raw_date, ${invoiceNetAmountExpr()} AS amount, i.invoice_id AS inv_id`,
+        'cn.date AS raw_date, -cni.item_total AS amount, NULL AS inv_id',
+        'sr.date AS raw_date, -sri.item_total AS amount, NULL AS inv_id'
+      )} m
+      GROUP BY month
+      ORDER BY month ASC
+    `).all(unionParams(w));
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });

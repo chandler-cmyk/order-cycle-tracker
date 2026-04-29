@@ -4,6 +4,8 @@ import DateRangePicker from './components/DateRangePicker';
 import FilterBar from './components/FilterBar';
 import MetricCards from './components/MetricCards';
 import RevenueTrendChart from './components/RevenueTrendChart';
+import RevenueBrandChart from './components/RevenueBrandChart';
+import MonthlyBreakdown from './components/MonthlyBreakdown';
 import StateMap from './components/StateMap';
 import ProductTable from './components/ProductTable';
 import CustomerView from './components/CustomerView';
@@ -575,12 +577,23 @@ export default function App() {
     return `?${p.toString()}`;
   })();
 
+  const monthlyQ = (() => {
+    if (!authed) return '';
+    const p = new URLSearchParams();
+    if (filters.brands.length)     p.set('brands',     filters.brands.join(','));
+    if (filters.categories.length) p.set('categories', filters.categories.join(','));
+    if (filters.sku)               p.set('sku',         filters.sku);
+    return p.toString() ? `?${p.toString()}` : '';
+  })();
+
   // ── Fetch data ───────────────────────────────────────────────────────────────
-  const metrics    = useFetch(authed ? `/api/dashboard/metrics${q}` : null);
-  const trend      = useFetch(authed ? `/api/dashboard/trend${trendQ}` : null);
-  const states     = useFetch(authed ? `/api/dashboard/states${q}` : null);
-  const products   = useFetch(authed ? `/api/dashboard/products${productQ}` : null);
-  const categories = useFetch(authed ? `/api/dashboard/categories${q}` : null);
+  const metrics        = useFetch(authed ? `/api/dashboard/metrics${q}` : null);
+  const trend          = useFetch(authed ? `/api/dashboard/trend${trendQ}` : null);
+  const brandBreakdown = useFetch(authed ? `/api/dashboard/brand-breakdown${q}` : null);
+  const monthly        = useFetch(authed ? `/api/dashboard/monthly${monthlyQ}` : null);
+  const states         = useFetch(authed ? `/api/dashboard/states${q}` : null);
+  const products       = useFetch(authed ? `/api/dashboard/products${productQ}` : null);
+  const categories     = useFetch(authed ? `/api/dashboard/categories${q}` : null);
 
   // Reset page when filters/sort change
   useEffect(() => { setProductPage(1); }, [filters, dateRange, productSort]);
@@ -723,6 +736,10 @@ export default function App() {
           {metrics.data && (
             <MetricCards data={metrics.data} loading={metrics.loading} />
           )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 20 }}>
+            <RevenueBrandChart data={brandBreakdown.data} loading={brandBreakdown.loading} />
+            <MonthlyBreakdown  data={monthly.data}        loading={monthly.loading} />
+          </div>
         </div>
       );
 
