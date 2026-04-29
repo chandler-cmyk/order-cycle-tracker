@@ -560,7 +560,7 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
     const s = req.query.start || '2000-01-01';
     const e = req.query.end   || '2099-12-31';
 
-    // Net revenue over time (invoices minus credit notes and sales returns by date)
+    // Net revenue over time (invoices minus credit notes and sales returns by document date)
     const trend = db.prepare(`
       SELECT raw_date AS date, COALESCE(SUM(amount), 0) AS revenue
       FROM (
@@ -568,14 +568,18 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
         FROM invoices i JOIN line_items li ON i.invoice_id = li.invoice_id
         WHERE i.customer_id = ? AND i.date BETWEEN ? AND ? AND i.status NOT IN ('void','draft')
         UNION ALL
-        SELECT COALESCE(ref_inv.date, cn.date) AS raw_date, -cni.item_total AS amount
+        SELECT cn.date AS raw_date, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        LEFT JOIN invoices ref_inv ON ref_inv.invoice_id = cn.invoice_id
-        WHERE cn.customer_id = ? AND COALESCE(ref_inv.date, cn.date) BETWEEN ? AND ? AND cn.status != 'void'
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
+        UNION ALL
+        SELECT sr.date AS raw_date, -sri.item_total AS amount
+        FROM sales_returns sr
+        JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+        WHERE sr.customer_id = ? AND sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
       )
       GROUP BY raw_date ORDER BY raw_date ASC
-    `).all([customerId, s, e, customerId, s, e]);
+    `).all([customerId, s, e, customerId, s, e, customerId, s, e]);
 
     // Top SKUs net of returns
     const topSkus = db.prepare(`
@@ -590,12 +594,16 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
         SELECT cni.sku, cni.name, cni.brand, cni.category, -cni.quantity AS qty, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        LEFT JOIN invoices ref_inv ON ref_inv.invoice_id = cn.invoice_id
-        WHERE cn.customer_id = ? AND COALESCE(ref_inv.date, cn.date) BETWEEN ? AND ? AND cn.status != 'void'
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
+        UNION ALL
+        SELECT sri.sku, sri.name, sri.brand, sri.category, -sri.quantity AS qty, -sri.item_total AS amount
+        FROM sales_returns sr
+        JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+        WHERE sr.customer_id = ? AND sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
       )
       GROUP BY sku, name, brand, category
       ORDER BY revenue DESC LIMIT 10
-    `).all([customerId, s, e, customerId, s, e]);
+    `).all([customerId, s, e, customerId, s, e, customerId, s, e]);
 
     // Invoice history
     const invoices = db.prepare(`
@@ -861,6 +869,12 @@ app.get('/api/dashboard/forecast', (req, res) => {
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
         WHERE cn.status NOT IN ('void','draft')
         GROUP BY period
+        UNION ALL
+        SELECT strftime('%Y-%m', sr.date) AS period,
+               -SUM(sri.item_total) AS revenue, 0 AS orders, -SUM(sri.quantity) AS units
+        FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+        WHERE sr.status NOT IN ('void','draft')
+        GROUP BY period
       )
       GROUP BY period ORDER BY period ASC
     `).all();
@@ -909,6 +923,11 @@ app.get('/api/dashboard/forecast', (req, res) => {
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
         WHERE cn.status NOT IN ('void','draft') AND cni.category != ''
         GROUP BY period, cni.category
+        UNION ALL
+        SELECT strftime('%Y-%m', sr.date) AS period, sri.category, -SUM(sri.item_total) AS revenue
+        FROM sales_returns sr JOIN sales_return_items sri ON sr.salesreturn_id = sri.salesreturn_id
+        WHERE sr.status NOT IN ('void','draft') AND sri.category != ''
+        GROUP BY period, sri.category
       )
       GROUP BY period, category ORDER BY period ASC
     `).all();
