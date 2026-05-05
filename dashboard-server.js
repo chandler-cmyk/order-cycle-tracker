@@ -8,6 +8,7 @@ require('dotenv').config();
 const db = require('./dashboard-server/db');
 const { syncState, startSync } = require('./dashboard-server/sync');
 const { inferBrandCategory, CATEGORIES } = require('./dashboard-server/categorize');
+const { getOrderCycles } = require('./dashboard-server/order-cycles');
 
 // ── Known item name misspellings → canonical names ────────────────────────────
 const NAME_CORRECTIONS = {
@@ -1086,6 +1087,22 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       srCnOverlap:       srWithLinkedCn,
     });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Dashboard: order cycles ────────────────────────────────────────────────────
+
+// GET /api/dashboard/order-cycles?refresh=true
+// Returns per-customer reorder cadence, churn risk, and next expected order date.
+// Data comes from Zoho Inventory salesorders API (last 18 months), cached 30 min.
+app.get('/api/dashboard/order-cycles', async (req, res) => {
+  try {
+    const bypassCache = req.query.refresh === 'true';
+    const result = await getOrderCycles({ bypassCache });
+    res.json(result);
+  } catch (e) {
+    console.error('Order cycles error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

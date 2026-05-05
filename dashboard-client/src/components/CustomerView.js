@@ -25,6 +25,16 @@ const STATUS_BADGES = {
   void:            { label: 'Void',     color: '#94a3b8', bg: '#f8fafc', border: '#e2e8f0' },
 };
 
+const CYCLE_STATUS_CFG = {
+  overdue:      { label: 'Overdue',   color: '#ef4444', bg: '#fef2f2', border: '#fecaca' },
+  due_soon:     { label: 'Due Soon',  color: '#f59e0b', bg: '#fffbeb', border: '#fde68a' },
+  on_track:     { label: 'On Track',  color: '#10b981', bg: '#f0fdf4', border: '#bbf7d0' },
+  new_customer: { label: 'New',       color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
+  inactive:     { label: 'Inactive',  color: '#6b7280', bg: '#f9fafb', border: '#d1d5db' },
+};
+
+const CHURN_COLORS = { High: '#ef4444', Medium: '#f59e0b', Low: '#10b981' };
+
 function StatusBadge({ status }) {
   const cfg = STATUS_BADGES[status] || { label: status, color: C.textMute, bg: C.bg, border: C.border };
   return (
@@ -38,8 +48,27 @@ function StatusBadge({ status }) {
   );
 }
 
+function CycleBadge({ status }) {
+  const cfg = CYCLE_STATUS_CFG[status];
+  if (!cfg) return <span style={{ color: C.textMute, fontSize: 12 }}>—</span>;
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 5,
+      fontSize: 11, fontWeight: 600,
+      color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
+    }}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function fmtShortDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // ── Customer detail panel ──────────────────────────────────────────────────────
-function CustomerDetail({ customer, dateRange, filters, onBack }) {
+function CustomerDetail({ customer, dateRange, filters, cycleData, subAccounts, onBack }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -89,6 +118,99 @@ function CustomerDetail({ customer, dateRange, filters, onBack }) {
         <div style={{ color: '#dc2626', padding: 20, fontSize: 13 }}>{error}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Reorder Intelligence */}
+          {cycleData && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 16 }}>Reorder Intelligence</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Order Status</div>
+                  <CycleBadge status={cycleData.cycleStatus} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Avg Reorder Cycle</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>
+                    {cycleData.avgCadenceDays ? `Every ${cycleData.avgCadenceDays} days` : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+                    {cycleData.daysOverdue ? 'Days Overdue' : 'Next Expected'}
+                  </div>
+                  {cycleData.daysOverdue ? (
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#ef4444' }}>{cycleData.daysOverdue} days late</div>
+                  ) : cycleData.nextExpected ? (
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{fmtShortDate(cycleData.nextExpected)}</div>
+                      {cycleData.daysUntilNext != null && (
+                        <div style={{ fontSize: 11, color: C.textMute, marginTop: 2 }}>in {cycleData.daysUntilNext} days</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 15, fontWeight: 700, color: C.textMute }}>—</div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Churn Risk</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: CHURN_COLORS[cycleData.churnRisk] || C.textMute }}>
+                      {cycleData.churnScore}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: CHURN_COLORS[cycleData.churnRisk] || C.textMute }}>{cycleData.churnRisk}</div>
+                      <div style={{ width: 48, height: 4, borderRadius: 2, background: C.border, marginTop: 3 }}>
+                        <div style={{ width: `${cycleData.churnScore}%`, height: '100%', borderRadius: 2, background: CHURN_COLORS[cycleData.churnRisk] || C.textMute }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub-accounts */}
+              {subAccounts && subAccounts.length > 0 && (
+                <div style={{ marginTop: 20, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: C.textMute, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+                    Sub-Accounts ({subAccounts.length})
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Name</th>
+                        <th style={th}>Status</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Orders</th>
+                        <th style={th}>Avg Cycle</th>
+                        <th style={th}>Next Expected</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Churn</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subAccounts.map((sub, i) => (
+                        <tr key={sub.id} style={{ background: i % 2 === 0 ? C.surface : C.bg }}>
+                          <td style={{ ...td, fontWeight: 600, color: C.text, fontSize: 12 }}>{sub.name}</td>
+                          <td style={td}><CycleBadge status={sub.cycleStatus} /></td>
+                          <td style={{ ...td, textAlign: 'right' }}>{sub.orderCount}</td>
+                          <td style={td}>{sub.avgCadenceDays ? `${sub.avgCadenceDays}d` : '—'}</td>
+                          <td style={td}>
+                            {sub.daysOverdue
+                              ? <span style={{ color: '#ef4444', fontWeight: 600, fontSize: 12 }}>{sub.daysOverdue}d late</span>
+                              : sub.nextExpected
+                                ? fmtShortDate(sub.nextExpected)
+                                : '—'
+                            }
+                          </td>
+                          <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: CHURN_COLORS[sub.churnRisk] || C.textMute }}>
+                            {sub.churnScore}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Revenue over time */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 16 }}>Revenue Over Time</div>
@@ -244,12 +366,15 @@ function SegmentBadge({ segment }) {
 
 // ── Customer list ──────────────────────────────────────────────────────────────
 export default function CustomerView({ dateRange, filters, filterOptions, onFiltersChange }) {
-  const [customers, setCustomers]       = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState(null);
-  const [selected, setSelected]         = useState(null);
-  const [search, setSearch]             = useState('');
-  const [segmentFilter, setSegmentFilter] = useState('all');
+  const [customers, setCustomers]           = useState([]);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState(null);
+  const [selected, setSelected]             = useState(null);
+  const [search, setSearch]                 = useState('');
+  const [segmentFilter, setSegmentFilter]   = useState('all');
+  const [cycleFilter, setCycleFilter]       = useState('all');
+  const [orderCycles, setOrderCycles]       = useState({ map: {}, subsByParent: {} });
+  const [cyclesLoading, setCyclesLoading]   = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -263,12 +388,40 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
 
   useEffect(() => { load(); setSelected(null); }, [load]);
 
+  // Load order cycle data once on mount — not date-range dependent
+  useEffect(() => {
+    setCyclesLoading(true);
+    fetch('/api/dashboard/order-cycles')
+      .then(r => r.json())
+      .then(d => {
+        const all = d.customers || [];
+        const map = {};
+        const subsByParent = {};
+        all.forEach(c => {
+          const key = (c.name || '').toLowerCase();
+          if (c.isSubCustomer) {
+            const parentKey = (c.viaCustomer || '').toLowerCase();
+            if (!subsByParent[parentKey]) subsByParent[parentKey] = [];
+            subsByParent[parentKey].push(c);
+          } else {
+            map[key] = c;
+          }
+        });
+        setOrderCycles({ map, subsByParent });
+        setCyclesLoading(false);
+      })
+      .catch(() => setCyclesLoading(false));
+  }, []);
+
   if (selected) {
+    const cycleKey = (selected.customer_name || '').toLowerCase();
     return (
       <CustomerDetail
         customer={selected}
         dateRange={dateRange}
         filters={filters}
+        cycleData={orderCycles.map[cycleKey]}
+        subAccounts={orderCycles.subsByParent[cycleKey] || []}
         onBack={() => setSelected(null)}
       />
     );
@@ -280,6 +433,10 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
   const filtered = customers.filter(c => {
     if (search && !c.customer_name?.toLowerCase().includes(search.toLowerCase())) return false;
     if (segmentFilter !== 'all' && c.segment !== segmentFilter) return false;
+    if (cycleFilter !== 'all') {
+      const cycle = orderCycles.map[(c.customer_name || '').toLowerCase()];
+      if (!cycle || cycle.cycleStatus !== cycleFilter) return false;
+    }
     return true;
   });
 
@@ -323,28 +480,54 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
         </div>
       </div>
 
-      {/* Segment filter tabs */}
+      {/* Filters row */}
       {!loading && customers.length > 0 && (
-        <div style={{ padding: '8px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', gap: 6 }}>
-          {[
-            { key: 'all',       label: 'All' },
-            { key: 'new',       label: 'New' },
-            { key: 'returning', label: 'Returning' },
-            { key: 'at_risk',   label: 'At Risk' },
-          ].map(({ key, label }) => {
-            const active = segmentFilter === key;
-            const cfg    = SEGMENT_CFG[key];
-            return (
-              <button key={key} onClick={() => setSegmentFilter(key)} style={{
-                padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                border:     `1px solid ${active ? (cfg?.color || C.accent) : C.border}`,
-                background: active ? (cfg?.bg || C.accentBg) : C.surface,
-                color:      active ? (cfg?.color || C.accent) : C.textMute,
-              }}>
-                {label} <span style={{ opacity: 0.7 }}>({counts[key]})</span>
-              </button>
-            );
-          })}
+        <div style={{ padding: '8px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Segment tabs */}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[
+              { key: 'all',       label: 'All' },
+              { key: 'new',       label: 'New' },
+              { key: 'returning', label: 'Returning' },
+              { key: 'at_risk',   label: 'At Risk' },
+            ].map(({ key, label }) => {
+              const active = segmentFilter === key;
+              const cfg    = SEGMENT_CFG[key];
+              return (
+                <button key={key} onClick={() => setSegmentFilter(key)} style={{
+                  padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  border:     `1px solid ${active ? (cfg?.color || C.accent) : C.border}`,
+                  background: active ? (cfg?.bg || C.accentBg) : C.surface,
+                  color:      active ? (cfg?.color || C.accent) : C.textMute,
+                }}>
+                  {label} <span style={{ opacity: 0.7 }}>({counts[key]})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Cycle status filter */}
+          {!cyclesLoading && Object.keys(orderCycles.map).length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: C.textMute, fontWeight: 600 }}>Order Status:</span>
+              <select
+                value={cycleFilter}
+                onChange={e => setCycleFilter(e.target.value)}
+                style={{
+                  border: `1px solid ${C.border}`, borderRadius: 5, padding: '4px 8px',
+                  fontSize: 11, color: C.text, background: C.surface, cursor: 'pointer',
+                  outline: 'none',
+                }}
+              >
+                <option value="all">All</option>
+                <option value="overdue">Overdue</option>
+                <option value="due_soon">Due Soon</option>
+                <option value="on_track">On Track</option>
+                <option value="new_customer">New</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
 
@@ -365,12 +548,21 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
               <th style={th}>Segment</th>
               <th style={{ ...th, textAlign: 'right' }}>Invoices</th>
               <th style={{ ...th, textAlign: 'right' }}>Revenue</th>
+              <th style={th}>Order Status</th>
+              <th style={{ ...th, textAlign: 'right' }}>Churn Risk</th>
+              <th style={th}>Next Expected</th>
               <th style={th}></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((c, i) => (
-              <CustomerRow key={c.customer_id} rank={i + 1} customer={c} onClick={() => setSelected(c)} />
+              <CustomerRow
+                key={c.customer_id}
+                rank={i + 1}
+                customer={c}
+                cycleData={orderCycles.map[(c.customer_name || '').toLowerCase()]}
+                onClick={() => setSelected(c)}
+              />
             ))}
           </tbody>
         </table>
@@ -379,8 +571,18 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
   );
 }
 
-function CustomerRow({ rank, customer, onClick }) {
+function CustomerRow({ rank, customer, cycleData, onClick }) {
   const [hovered, setHovered] = useState(false);
+
+  const nextExpectedDisplay = () => {
+    if (!cycleData) return '—';
+    if (cycleData.daysOverdue) return (
+      <span style={{ color: '#ef4444', fontWeight: 600, fontSize: 12 }}>{cycleData.daysOverdue}d late</span>
+    );
+    if (cycleData.nextExpected) return fmtShortDate(cycleData.nextExpected);
+    return '—';
+  };
+
   return (
     <tr
       onClick={onClick}
@@ -393,6 +595,17 @@ function CustomerRow({ rank, customer, onClick }) {
       <td style={td}><SegmentBadge segment={customer.segment} /></td>
       <td style={{ ...td, textAlign: 'right' }}>{fmtNumber(customer.orderCount)}</td>
       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: C.text }}>{fmtCurrency(customer.revenue)}</td>
+      <td style={td}>
+        {cycleData ? <CycleBadge status={cycleData.cycleStatus} /> : <span style={{ color: C.textMute, fontSize: 12 }}>—</span>}
+      </td>
+      <td style={{ ...td, textAlign: 'right' }}>
+        {cycleData ? (
+          <span style={{ fontWeight: 700, color: CHURN_COLORS[cycleData.churnRisk] || C.textMute }}>
+            {cycleData.churnScore}
+          </span>
+        ) : <span style={{ color: C.textMute, fontSize: 12 }}>—</span>}
+      </td>
+      <td style={{ ...td, fontSize: 12 }}>{nextExpectedDisplay()}</td>
       <td style={{ ...td, color: C.textMute, fontSize: 11 }}>
         {hovered && <span style={{ color: C.accent }}>View details →</span>}
       </td>
