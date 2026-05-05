@@ -548,6 +548,7 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
               <th style={th}>Segment</th>
               <th style={{ ...th, textAlign: 'right' }}>Invoices</th>
               <th style={{ ...th, textAlign: 'right' }}>Revenue</th>
+              <th style={th}>Last Order</th>
               <th style={th}>Order Status</th>
               <th style={{ ...th, textAlign: 'right' }}>Churn Risk</th>
               <th style={th}>Next Expected</th>
@@ -595,6 +596,9 @@ function CustomerRow({ rank, customer, cycleData, onClick }) {
       <td style={td}><SegmentBadge segment={customer.segment} /></td>
       <td style={{ ...td, textAlign: 'right' }}>{fmtNumber(customer.orderCount)}</td>
       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: C.text }}>{fmtCurrency(customer.revenue)}</td>
+      <td style={{ ...td, fontSize: 12 }}>
+        {fmtShortDate(cycleData?.lastOrderDate || customer.lastOrderDate)}
+      </td>
       <td style={td}>
         {cycleData ? <CycleBadge status={cycleData.cycleStatus} /> : <span style={{ color: C.textMute, fontSize: 12 }}>—</span>}
       </td>
