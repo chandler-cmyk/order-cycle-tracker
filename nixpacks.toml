@@ -2,4 +2,4 @@
 cmds = ["npm install"]
 
 [phases.build]
-cmds = ["node build.js"]
+cmds = ["npm run dashboard:build"]
