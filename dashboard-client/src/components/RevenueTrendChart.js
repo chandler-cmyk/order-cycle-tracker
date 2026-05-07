@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   ResponsiveContainer, XAxis, YAxis,
-  CartesianGrid, Tooltip, Area, AreaChart, Line,
+  CartesianGrid, Tooltip, Area, ComposedChart, Line,
 } from 'recharts';
 import { C, fmtCurrency, fmtDate } from '../utils';
 
@@ -125,7 +125,7 @@ export default function RevenueTrendChart({ data, loading, group, onGroupChange 
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={340}>
-          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="revGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor={C.accent} stopOpacity={0.18} />
@@ -169,7 +169,7 @@ export default function RevenueTrendChart({ data, loading, group, onGroupChange 
               dot={chartData.length <= 31 ? { r: 3, fill: C.accent, strokeWidth: 0 } : false}
               activeDot={{ r: 5, fill: C.accent }}
             />
-          </AreaChart>
+          </ComposedChart>
         </ResponsiveContainer>
       )}
     </div>
