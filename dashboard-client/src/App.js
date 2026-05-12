@@ -609,7 +609,7 @@ export default function App() {
       products.reload();
       categories.reload();
     }
-  }, [syncStatus.syncing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [syncStatus.syncing]); // eslint-disable-line
 
   // Reset page when filters/sort change
   useEffect(() => { setProductPage(1); }, [filters, dateRange, productSort]);
