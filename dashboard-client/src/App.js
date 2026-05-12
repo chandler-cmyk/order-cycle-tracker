@@ -595,6 +595,22 @@ export default function App() {
   const products       = useFetch(authed ? `/api/dashboard/products${productQ}` : null);
   const categories     = useFetch(authed ? `/api/dashboard/categories${q}` : null);
 
+  // Reload all data when sync completes
+  const wasSyncingRef = useRef(false);
+  useEffect(() => {
+    const justFinished = wasSyncingRef.current && !syncStatus.syncing;
+    wasSyncingRef.current = syncStatus.syncing;
+    if (justFinished) {
+      metrics.reload();
+      trend.reload();
+      brandBreakdown.reload();
+      monthly.reload();
+      states.reload();
+      products.reload();
+      categories.reload();
+    }
+  }, [syncStatus.syncing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reset page when filters/sort change
   useEffect(() => { setProductPage(1); }, [filters, dateRange, productSort]);
 
