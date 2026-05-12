@@ -598,8 +598,8 @@ export default function App() {
   // Reload all data when sync completes
   const wasSyncingRef = useRef(false);
   useEffect(() => {
-    const justFinished = wasSyncingRef.current && !syncStatus.syncing;
-    wasSyncingRef.current = syncStatus.syncing;
+    const justFinished = wasSyncingRef.current && !syncStatus?.syncing;
+    wasSyncingRef.current = syncStatus?.syncing ?? false;
     if (justFinished) {
       metrics.reload();
       trend.reload();
@@ -609,7 +609,7 @@ export default function App() {
       products.reload();
       categories.reload();
     }
-  }, [syncStatus.syncing]); // eslint-disable-line
+  }, [syncStatus]); // eslint-disable-line
 
   // Reset page when filters/sort change
   useEffect(() => { setProductPage(1); }, [filters, dateRange, productSort]);
