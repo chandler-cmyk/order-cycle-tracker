@@ -364,8 +364,25 @@ function SegmentBadge({ segment }) {
   );
 }
 
+function parseCyclesResponse(d) {
+  const all = d.customers || [];
+  const map = {};
+  const subsByParent = {};
+  all.forEach(c => {
+    const key = (c.name || '').toLowerCase();
+    if (c.isSubCustomer) {
+      const parentKey = (c.viaCustomer || '').toLowerCase();
+      if (!subsByParent[parentKey]) subsByParent[parentKey] = [];
+      subsByParent[parentKey].push(c);
+    } else {
+      map[key] = c;
+    }
+  });
+  return { map, subsByParent };
+}
+
 // ── Customer list ──────────────────────────────────────────────────────────────
-export default function CustomerView({ dateRange, filters, filterOptions, onFiltersChange }) {
+export default function CustomerView({ dateRange, filters, filterOptions, onFiltersChange, prefetchedCycles, cyclesPrefetching }) {
   const [customers, setCustomers]           = useState([]);
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState(null);
@@ -374,7 +391,7 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
   const [segmentFilter, setSegmentFilter]   = useState('all');
   const [cycleFilter, setCycleFilter]       = useState('all');
   const [orderCycles, setOrderCycles]       = useState({ map: {}, subsByParent: {} });
-  const [cyclesLoading, setCyclesLoading]   = useState(true);
+  const [cyclesLoading, setCyclesLoading]   = useState(!prefetchedCycles);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -388,30 +405,24 @@ export default function CustomerView({ dateRange, filters, filterOptions, onFilt
 
   useEffect(() => { load(); setSelected(null); }, [load]);
 
-  // Load order cycle data once on mount — not date-range dependent
+  // Use prefetched cycles from App if available; otherwise fetch independently
   useEffect(() => {
+    if (prefetchedCycles) {
+      setOrderCycles(parseCyclesResponse(prefetchedCycles));
+      setCyclesLoading(false);
+      return;
+    }
+    if (cyclesPrefetching) {
+      setCyclesLoading(true);
+      return;
+    }
+    // Fallback: fetch directly if prefetch never started (e.g. dev/stale mount)
     setCyclesLoading(true);
     fetch('/api/dashboard/order-cycles')
       .then(r => r.json())
-      .then(d => {
-        const all = d.customers || [];
-        const map = {};
-        const subsByParent = {};
-        all.forEach(c => {
-          const key = (c.name || '').toLowerCase();
-          if (c.isSubCustomer) {
-            const parentKey = (c.viaCustomer || '').toLowerCase();
-            if (!subsByParent[parentKey]) subsByParent[parentKey] = [];
-            subsByParent[parentKey].push(c);
-          } else {
-            map[key] = c;
-          }
-        });
-        setOrderCycles({ map, subsByParent });
-        setCyclesLoading(false);
-      })
+      .then(d => { setOrderCycles(parseCyclesResponse(d)); setCyclesLoading(false); })
       .catch(() => setCyclesLoading(false));
-  }, []);
+  }, [prefetchedCycles, cyclesPrefetching]);
 
   if (selected) {
     const cycleKey = (selected.customer_name || '').toLowerCase();

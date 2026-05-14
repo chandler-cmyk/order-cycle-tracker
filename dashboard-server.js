@@ -1130,6 +1130,12 @@ app.listen(PORT, () => {
     console.log(`📂 ${invCount} invoices in DB. Running delta sync for updates...`);
   }
   startSync().catch(e => console.error('Auto-sync failed:', e.message));
+
+  // Warm order-cycles cache in background so first Customers tab click is instant
+  console.log('🔄 Pre-warming order cycles cache...');
+  getOrderCycles({}).then(() => {
+    console.log('✅ Order cycles cache warmed');
+  }).catch(e => console.error('Order cycles pre-warm failed:', e.message));
 });
 
 // SPA fallback — serve index.html for any non-API route

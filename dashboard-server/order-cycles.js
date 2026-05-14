@@ -1,4 +1,6 @@
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+const fs = require('fs');
+const path = require('path');
 
 const {
   ZOHO_CLIENT_ID,
@@ -49,11 +51,23 @@ const SUB_CUSTOMERS = [
 
 const INACTIVE_DAYS = 180;
 const CACHE_DURATION_MS = 30 * 60 * 1000;
+const DISK_CACHE_PATH = path.join(__dirname, '..', 'data', 'order-cycles-cache.json');
 
 let cachedToken = null;
 let tokenExpiry = null;
 let cachedCycles = null;
 let cyclesCachedAt = null;
+
+// Load persisted cache from disk on startup
+try {
+  const raw = fs.readFileSync(DISK_CACHE_PATH, 'utf8');
+  const { customers, cachedAt } = JSON.parse(raw);
+  if (customers && cachedAt && (Date.now() - cachedAt) < CACHE_DURATION_MS) {
+    cachedCycles = customers;
+    cyclesCachedAt = cachedAt;
+    console.log(`✅ [order-cycles] Loaded ${customers.length} customers from disk cache (age: ${Math.round((Date.now() - cachedAt) / 60000)}m)`);
+  }
+} catch (_) { /* no cache file yet */ }
 
 async function getAccessToken() {
   const now = Date.now();
@@ -427,6 +441,11 @@ async function getOrderCycles({ bypassCache = false } = {}) {
   const enriched = await enrichOrdersWithLineItems(orders, token);
   cachedCycles = processOrders(enriched);
   cyclesCachedAt = now;
+  try {
+    fs.writeFileSync(DISK_CACHE_PATH, JSON.stringify({ customers: cachedCycles, cachedAt: cyclesCachedAt }));
+  } catch (e) {
+    console.warn('[order-cycles] Could not write disk cache:', e.message);
+  }
   return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: false };
 }
 

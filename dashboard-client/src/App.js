@@ -511,6 +511,8 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState(null);
   const [filterOptions, setFilterOptions] = useState({ brands: [], categories: [] });
   const [selectedState, setSelectedState] = useState(null); // { abbr, name, revenue }
+  const [prefetchedCycles, setPrefetchedCycles] = useState(null);
+  const [cyclesPrefetching, setCyclesPrefetching] = useState(false);
   const syncPollRef = useRef(null);
 
   // ── Filter options (brands/categories) ──────────────────────────────────────
@@ -520,6 +522,16 @@ export default function App() {
       .then(r => r.json())
       .then(d => setFilterOptions(d))
       .catch(() => {});
+  }, [authed]);
+
+  // ── Prefetch order cycles in background so Customers tab loads instantly ─────
+  useEffect(() => {
+    if (!authed) return;
+    setCyclesPrefetching(true);
+    fetch('/api/dashboard/order-cycles')
+      .then(r => r.json())
+      .then(d => { setPrefetchedCycles(d); setCyclesPrefetching(false); })
+      .catch(() => setCyclesPrefetching(false));
   }, [authed]);
 
   // ── Sync status polling ──────────────────────────────────────────────────────
@@ -809,6 +821,8 @@ export default function App() {
           filters={filters}
           filterOptions={filterOptions}
           onFiltersChange={f => { setFilters(f); }}
+          prefetchedCycles={prefetchedCycles}
+          cyclesPrefetching={cyclesPrefetching}
         />
       );
 
