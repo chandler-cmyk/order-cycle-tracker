@@ -119,6 +119,36 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sr_status    ON sales_returns(status);
   CREATE INDEX IF NOT EXISTS idx_srcn_sr      ON sales_return_credit_notes(salesreturn_id);
   CREATE INDEX IF NOT EXISTS idx_srcn_cn      ON sales_return_credit_notes(creditnote_id);
+
+  CREATE TABLE IF NOT EXISTS sales_orders (
+    salesorder_id      TEXT PRIMARY KEY,
+    salesorder_number  TEXT,
+    customer_id        TEXT,
+    customer_name      TEXT,
+    date               TEXT,
+    status             TEXT,
+    reference_number   TEXT DEFAULT '',
+    total              REAL DEFAULT 0,
+    quantity           REAL DEFAULT 0,
+    last_modified_time TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS sales_order_line_items (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    salesorder_id  TEXT NOT NULL,
+    item_id        TEXT,
+    sku            TEXT,
+    name           TEXT,
+    brand          TEXT,
+    category       TEXT,
+    quantity       REAL DEFAULT 0,
+    item_total     REAL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_so_customer  ON sales_orders(customer_id);
+  CREATE INDEX IF NOT EXISTS idx_so_date      ON sales_orders(date);
+  CREATE INDEX IF NOT EXISTS idx_so_status    ON sales_orders(status);
+  CREATE INDEX IF NOT EXISTS idx_soli_so      ON sales_order_line_items(salesorder_id);
 `);
 
 // Idempotent migrations — add columns that may not exist in older DBs

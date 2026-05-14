@@ -193,6 +193,34 @@ const _saveInvoiceTx = db.transaction((inv, lineItems) => {
   }
 });
 
+// ── Sales order DB helpers ─────────────────────────────────────────────────────
+const _upsertSalesOrder = db.prepare(`
+  INSERT OR REPLACE INTO sales_orders
+    (salesorder_id, salesorder_number, customer_id, customer_name, date, status, reference_number, total, quantity, last_modified_time)
+  VALUES (?,?,?,?,?,?,?,?,?,?)
+`);
+const _deleteSOLineItems = db.prepare(`DELETE FROM sales_order_line_items WHERE salesorder_id = ?`);
+const _insertSOLineItem  = db.prepare(`
+  INSERT INTO sales_order_line_items (salesorder_id, item_id, sku, name, brand, category, quantity, item_total)
+  VALUES (?,?,?,?,?,?,?,?)
+`);
+
+const _saveSalesOrderTx = db.transaction((so, lineItems) => {
+  _upsertSalesOrder.run(
+    so.salesorder_id, so.salesorder_number, so.customer_id, so.customer_name,
+    so.date, so.status, so.reference_number, so.total, so.quantity, so.last_modified_time
+  );
+  _deleteSOLineItems.run(so.salesorder_id);
+  for (const li of lineItems) {
+    _insertSOLineItem.run(
+      so.salesorder_id, li.item_id || '', li.sku || '', li.name || '',
+      li.brand || '', li.category || '',
+      parseFloat(li.quantity) || 0,
+      parseFloat(li.item_total) || (parseFloat(li.quantity || 0) * parseFloat(li.rate || 0)) || 0
+    );
+  }
+});
+
 // ── Credit note DB helpers ─────────────────────────────────────────────────────
 const _upsertCreditNote = db.prepare(`
   INSERT OR REPLACE INTO credit_notes
@@ -530,6 +558,113 @@ async function backfillSalesByItemInvoiceDiscounts(token) {
   console.log(`  ✅ Invoice discount backfill complete: ${updated} updated`);
 }
 
+// ── Sales order sync ──────────────────────────────────────────────────────────
+async function syncSalesOrders(token, deltaFilter) {
+  const _checkExistingSO = db.prepare(
+    `SELECT last_modified_time FROM sales_orders WHERE salesorder_id = ?`
+  );
+
+  let allSOs = [];
+  let page = 1;
+  let hasMore = true;
+  let effectiveDeltaFilter = deltaFilter;
+
+  while (hasMore) {
+    syncState.progress = `Fetching sales order list — page ${page}...`;
+    const url = new URL(`${BASE}/salesorders`);
+    url.searchParams.set('organization_id', ZOHO_ORG_ID);
+    url.searchParams.set('per_page', '200');
+    url.searchParams.set('page', String(page));
+    if (effectiveDeltaFilter) url.searchParams.set('last_modified_time', toZohoTimestamp(effectiveDeltaFilter));
+
+    let res;
+    try {
+      res = await fetchWithRetry(url.toString(), { Authorization: `Zoho-oauthtoken ${token}` });
+      if (!res || !res.ok) {
+        if (effectiveDeltaFilter && res?.status === 400) {
+          console.warn(`  ⚠️  Sales orders delta sync 400 — falling back to full sync`);
+          effectiveDeltaFilter = null;
+          continue;
+        }
+        console.warn(`  ⚠️  Sales orders page ${page} failed: ${res?.status}`);
+        break;
+      }
+    } catch (e) {
+      console.warn(`  ⚠️  Sales orders page ${page} error: ${e.message}`);
+      break;
+    }
+
+    const data = await res.json();
+    const sos = data.salesorders || [];
+    allSOs = allSOs.concat(sos);
+    hasMore = data.page_context?.has_more_page || false;
+    console.log(`  📄 SO page ${page}: ${sos.length} orders (total: ${allSOs.length})`);
+    page++;
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  if (allSOs.length === 0) {
+    console.log(`  ✅ No sales orders to process`);
+    return;
+  }
+
+  let processed = 0, skipped = 0, failed = 0;
+  const total = allSOs.length;
+
+  for (let i = 0; i < total; i++) {
+    const soSummary = allSOs[i];
+    const existing = _checkExistingSO.get(soSummary.salesorder_id);
+    if (existing && existing.last_modified_time === soSummary.last_modified_time) {
+      skipped++;
+      if (skipped % 50 === 0) console.log(`  ⏭  Skipped ${skipped} already-current sales orders...`);
+      continue;
+    }
+
+    syncState.progress = `Fetching sales order ${i + 1} of ${total} (${skipped} skipped, ${processed} saved)...`;
+
+    try {
+      const detailUrl = `${BASE}/salesorders/${soSummary.salesorder_id}?organization_id=${ZOHO_ORG_ID}`;
+      const detailRes = await fetchWithRetry(detailUrl, { Authorization: `Zoho-oauthtoken ${token}` });
+      const data = detailRes?.ok ? await detailRes.json() : null;
+      const so = data?.salesorder || soSummary;
+
+      const lineItems = Array.isArray(so.line_items) ? so.line_items : [];
+      const enrichedItems = lineItems.map(li => {
+        const correctedName = correctItemName(li.name || li.item_name || '');
+        const { brand, category } = inferBrandCategory(correctedName);
+        return { ...li, name: correctedName, brand, category };
+      });
+
+      _saveSalesOrderTx(
+        {
+          salesorder_id:     so.salesorder_id,
+          salesorder_number: so.salesorder_number || '',
+          customer_id:       so.customer_id || '',
+          customer_name:     so.customer_name || '',
+          date:              so.date || '',
+          status:            (so.order_status || so.status || '').toLowerCase(),
+          reference_number:  so.reference_number || '',
+          total:             parseFloat(so.total) || 0,
+          quantity:          parseFloat(so.quantity) || 0,
+          last_modified_time: so.last_modified_time || '',
+        },
+        enrichedItems
+      );
+      processed++;
+      if (processed % 25 === 0) {
+        const eta = Math.round(((total - i - 1) * REQUEST_DELAY_MS) / 60000);
+        console.log(`  ✅ ${processed} saved, ${skipped} skipped, ~${eta}m remaining`);
+      }
+    } catch (e) {
+      console.error(`  ❌ Sales order ${soSummary.salesorder_id}: ${e.message}`);
+      failed++;
+    }
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  console.log(`  ✅ Sales orders: ${processed} saved, ${skipped} skipped, ${failed} failed`);
+}
+
 // ── Core sync logic ────────────────────────────────────────────────────────────
 async function startSync() {
   if (syncState.syncing) {
@@ -665,11 +800,16 @@ async function startSync() {
     const srToken = await getAccessToken();
     await syncSalesReturns(srToken, deltaFilter);
 
+    // ── Phase 5: sync sales orders ────────────────────────────────────────────
+    console.log(`\n🔄 Syncing sales orders...`);
+    const soToken = await getAccessToken();
+    await syncSalesOrders(soToken, deltaFilter);
+
     console.log(`\nChecking invoice discount metadata...`);
     const discountToken = await getAccessToken();
     await backfillSalesByItemInvoiceDiscounts(discountToken);
 
-    // ── Phase 5: update meta ───────────────────────────────────────────────────
+    // ── Phase 6: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
     syncState.lastSync = syncStart.toISOString();
 

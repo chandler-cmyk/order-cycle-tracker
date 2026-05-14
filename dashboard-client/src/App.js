@@ -525,10 +525,9 @@ export default function App() {
   }, [authed]);
 
   // ── Prefetch order cycles in background so Customers tab loads instantly ─────
-  const reloadCycles = useCallback((bypassCache = false) => {
+  const reloadCycles = useCallback(() => {
     setCyclesPrefetching(true);
-    const url = bypassCache ? '/api/dashboard/order-cycles?refresh=true' : '/api/dashboard/order-cycles';
-    fetch(url)
+    fetch('/api/dashboard/order-cycles')
       .then(r => r.json())
       .then(d => { setPrefetchedCycles(d); setCyclesPrefetching(false); })
       .catch(() => setCyclesPrefetching(false));

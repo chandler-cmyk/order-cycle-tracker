@@ -1,202 +1,20 @@
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
-const fs = require('fs');
-const path = require('path');
-
-const {
-  ZOHO_CLIENT_ID,
-  ZOHO_CLIENT_SECRET,
-  ZOHO_REFRESH_TOKEN,
-  ZOHO_ORG_ID,
-} = process.env;
-
-const SUB_CUSTOMERS = [
-  'J&A Greensboro',
-  'S&A Wholesale',
-  'M&A Distro',
-  'Eagle Wholesale',
-  'Quality Distribution',
-  'Magical Vapors',
-  'High Altitude Wholesale',
-  'Sunrise Wholesale',
-  'Eagle Highborn',
-  'Kali King',
-  'Novelty King',
-  'Malani Enterprise',
-  'TN Smoke',
-  'Cryptic Trading',
-  'Big Z Distribution',
-  'Music City Imports',
-  'ARC Wholesale',
-  'Down South Distro',
-  'Aimrock Distributors',
-  'Zee Hot Spot',
-  'MDK Family Inc',
-  'Wholesale Outlet',
-  'MAG Industries',
-  'Tri State Distro',
-  'BNC Distribution Inc',
-  'Skokie Wholesale',
-  'Good Price Wholesale',
-  'Global Cash & Carry Inc',
-  'Loop Distribution',
-  'Wiseman Wholesale',
-  'Kriaa Wholesale',
-  'A2Z Charlotte',
-  'AAA Houston',
-  'AAA Wholesale Supply',
-  'Labib Wilmington',
-  'RAM Wholesale',
-  'Center Point Distribution',
-];
+const db = require('./db');
 
 const INACTIVE_DAYS = 180;
-const CACHE_DURATION_MS = 30 * 60 * 1000;
-const DISK_CACHE_PATH = path.join(__dirname, '..', 'data', 'order-cycles-cache.json');
 
-let cachedToken = null;
-let tokenExpiry = null;
-let cachedCycles = null;
-let cyclesCachedAt = null;
-let fetchInFlight = null; // deduplicates concurrent requests
-
-// Load persisted cache from disk on startup
-try {
-  const raw = fs.readFileSync(DISK_CACHE_PATH, 'utf8');
-  const { customers, cachedAt } = JSON.parse(raw);
-  if (customers && cachedAt && (Date.now() - cachedAt) < CACHE_DURATION_MS) {
-    cachedCycles = customers;
-    cyclesCachedAt = cachedAt;
-    console.log(`✅ [order-cycles] Loaded ${customers.length} customers from disk cache (age: ${Math.round((Date.now() - cachedAt) / 60000)}m)`);
-  }
-} catch (_) { /* no cache file yet */ }
-
-async function getAccessToken() {
-  const now = Date.now();
-  if (cachedToken && tokenExpiry && now < tokenExpiry) return cachedToken;
-
-  console.log('🔄 [order-cycles] Refreshing Zoho access token...');
-  const params = new URLSearchParams({
-    grant_type: 'refresh_token',
-    client_id: ZOHO_CLIENT_ID,
-    client_secret: ZOHO_CLIENT_SECRET,
-    refresh_token: ZOHO_REFRESH_TOKEN,
-  });
-  const res = await fetch('https://accounts.zoho.com/oauth/v2/token', { method: 'POST', body: params });
-  const data = await res.json();
-  if (!data.access_token) throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
-  cachedToken = data.access_token;
-  tokenExpiry = now + (data.expires_in - 60) * 1000;
-  console.log('✅ [order-cycles] Token refreshed');
-  return cachedToken;
-}
-
-async function fetchAllOrders(token) {
-  const fromDate = new Date();
-  fromDate.setMonth(fromDate.getMonth() - 18);
-  const fromDateStr = fromDate.toISOString().slice(0, 10);
-
-  let allOrders = [];
-  let page = 1;
-  let hasMore = true;
-
-  while (hasMore && page <= 15) {
-    const url = new URL('https://www.zohoapis.com/inventory/v1/salesorders');
-    url.searchParams.set('organization_id', ZOHO_ORG_ID);
-    url.searchParams.set('per_page', '200');
-    url.searchParams.set('page', page);
-    url.searchParams.set('sort_column', 'date');
-    url.searchParams.set('sort_order', 'D');
-    url.searchParams.set('date_after', fromDateStr);
-
-    const res = await fetch(url.toString(), { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-    if (!res.ok) throw new Error(`Zoho API error: ${res.status}`);
-    const data = await res.json();
-    const orders = data.salesorders || [];
-    allOrders = [...allOrders, ...orders];
-    hasMore = data.page_context?.has_more_page || false;
-    console.log(`📦 [order-cycles] Page ${page}: ${orders.length} orders (total: ${allOrders.length})`);
-    page++;
-  }
-  return allOrders;
-}
-
-async function fetchOrderDetail(salesorderId, token, retries = 4) {
-  const url = `https://www.zohoapis.com/inventory/v1/salesorders/${salesorderId}?organization_id=${ZOHO_ORG_ID}`;
-  const headers = { Authorization: `Zoho-oauthtoken ${token}` };
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch(url, { headers });
-    if (res.status !== 429) return res;
-    const wait = 1000 * Math.pow(2, attempt);
-    console.warn(`  ⏳ [order-cycles] 429 on ${salesorderId}, waiting ${wait}ms...`);
-    await new Promise(r => setTimeout(r, wait));
-  }
-  return null;
-}
-
-async function enrichOrdersWithLineItems(orders, token) {
-  const BATCH_SIZE = 20;
-  const subLower = SUB_CUSTOMERS.map(s => s.toLowerCase());
-
-  const byCustomer = {};
-  orders.forEach((o, idx) => {
-    if (!byCustomer[o.customer_id]) byCustomer[o.customer_id] = [];
-    byCustomer[o.customer_id].push({ date: o.date, idx });
-  });
-
-  const toEnrichSet = new Set();
-  Object.values(byCustomer).forEach(entries => {
-    entries.sort((a, b) => (a.date < b.date ? 1 : -1));
-    entries.slice(0, 5).forEach(({ idx }) => toEnrichSet.add(idx));
-  });
-
-  const bySubCustomer = {};
-  orders.forEach((o, idx) => {
-    const ref = (o.reference_number || '').toLowerCase();
-    if (!ref) return;
-    const match = subLower.find(s => ref.includes(s));
-    if (match) {
-      if (!bySubCustomer[match]) bySubCustomer[match] = [];
-      bySubCustomer[match].push({ date: o.date, idx });
-    }
-  });
-  Object.values(bySubCustomer).forEach(entries => {
-    entries.sort((a, b) => (a.date < b.date ? 1 : -1));
-    entries.slice(0, 3).forEach(({ idx }) => toEnrichSet.add(idx));
-  });
-
-  const toEnrich = Array.from(toEnrichSet);
-  const enriched = [...orders];
-  let successCount = 0;
-  let failCount = 0;
-  console.log(`🔍 [order-cycles] Enriching ${toEnrich.length} orders with line items...`);
-
-  for (let i = 0; i < toEnrich.length; i += BATCH_SIZE) {
-    const batch = toEnrich.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async orderIdx => {
-      const order = enriched[orderIdx];
-      try {
-        const res = await fetchOrderDetail(order.salesorder_id, token);
-        if (!res) { failCount++; return; }
-        if (!res.ok) { failCount++; return; }
-        const data = await res.json();
-        if (data.salesorder && Array.isArray(data.salesorder.line_items)) {
-          enriched[orderIdx].line_items = data.salesorder.line_items;
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch (e) {
-        console.error(`  ❌ [order-cycles] Order ${order.salesorder_id}: ${e.message}`);
-        failCount++;
-      }
-    }));
-    if (i + BATCH_SIZE < toEnrich.length) {
-      await new Promise(r => setTimeout(r, 200));
-    }
-  }
-  console.log(`✅ [order-cycles] Enrichment done: ${successCount} ok, ${failCount} failed`);
-  return enriched;
-}
+const SUB_CUSTOMERS = [
+  'J&A Greensboro', 'S&A Wholesale', 'M&A Distro', 'Eagle Wholesale',
+  'Quality Distribution', 'Magical Vapors', 'High Altitude Wholesale',
+  'Sunrise Wholesale', 'Eagle Highborn', 'Kali King', 'Novelty King',
+  'Malani Enterprise', 'TN Smoke', 'Cryptic Trading', 'Big Z Distribution',
+  'Music City Imports', 'ARC Wholesale', 'Down South Distro',
+  'Aimrock Distributors', 'Zee Hot Spot', 'MDK Family Inc',
+  'Wholesale Outlet', 'MAG Industries', 'Tri State Distro',
+  'BNC Distribution Inc', 'Skokie Wholesale', 'Good Price Wholesale',
+  'Global Cash & Carry Inc', 'Loop Distribution', 'Wiseman Wholesale',
+  'Kriaa Wholesale', 'A2Z Charlotte', 'AAA Houston', 'AAA Wholesale Supply',
+  'Labib Wilmington', 'RAM Wholesale', 'Center Point Distribution',
+];
 
 function buildSkuStats(sku) {
   const sorted = sku.orders.slice().sort((a, b) => a.date - b.date);
@@ -365,100 +183,105 @@ function buildCustomerStats(c) {
   };
 }
 
-function processOrders(salesOrders) {
+function getOrderCycles() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 18);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const orderRows = db.prepare(`
+    SELECT customer_id, customer_name, date, status,
+           total AS order_value, quantity AS order_qty, reference_number
+    FROM sales_orders
+    WHERE date >= ?
+      AND status NOT IN ('void', 'cancelled', 'draft')
+    ORDER BY customer_id, date
+  `).all(cutoffStr);
+
+  const lineItemRows = db.prepare(`
+    SELECT so.customer_id, so.reference_number, li.name, so.date,
+           li.quantity, li.item_total
+    FROM sales_orders so
+    JOIN sales_order_line_items li ON li.salesorder_id = so.salesorder_id
+    WHERE so.date >= ?
+      AND so.status NOT IN ('void', 'cancelled', 'draft')
+  `).all(cutoffStr);
+
   const customerMap = {};
   const subCustomerMap = {};
   const subLower = SUB_CUSTOMERS.map(s => ({ canonical: s, lower: s.toLowerCase() }));
 
-  salesOrders.forEach(order => {
-    const id = order.customer_id;
-    const name = order.customer_name;
-    const date = new Date(order.date + 'T00:00:00');
-    const value = parseFloat(order.total) || 0;
-    const qty = parseFloat(order.quantity) || 0;
-    const ref = (order.reference_number || '').toLowerCase();
-
-    const lineItems = (order.line_items || []).map(li => ({
-      name: li.name || li.item_name || 'Unknown',
-      qty: parseFloat(li.quantity) || 0,
-      value: parseFloat(li.item_total) || (parseFloat(li.quantity || 0) * parseFloat(li.rate || 0)) || 0,
-    }));
-    const skuNames = lineItems.map(li => li.name);
-
-    if (!customerMap[id]) {
-      customerMap[id] = { id, name, orders: [], totalValue: 0, skuMap: {} };
+  for (const row of orderRows) {
+    if (!customerMap[row.customer_id]) {
+      customerMap[row.customer_id] = {
+        id: row.customer_id, name: row.customer_name,
+        orders: [], totalValue: 0, skuMap: {},
+      };
     }
-    customerMap[id].orders.push({ date, value, qty, items: skuNames, status: order.order_status });
-    customerMap[id].totalValue += value;
-
-    lineItems.forEach(li => {
-      if (!customerMap[id].skuMap[li.name]) {
-        customerMap[id].skuMap[li.name] = { name: li.name, orders: [] };
-      }
-      customerMap[id].skuMap[li.name].orders.push({ date, qty: li.qty, value: li.value });
+    const c = customerMap[row.customer_id];
+    c.orders.push({
+      date: new Date(row.date + 'T00:00:00'),
+      value: row.order_value,
+      qty: row.order_qty,
+      status: row.status,
     });
+    c.totalValue += row.order_value;
 
+    const ref = (row.reference_number || '').toLowerCase();
     if (ref) {
       const match = subLower.find(s => ref.includes(s.lower));
       if (match) {
         const subId = `sub_${match.lower}`;
         if (!subCustomerMap[subId]) {
           subCustomerMap[subId] = {
-            id: subId, name: match.canonical, orders: [], totalValue: 0,
-            skuMap: {}, isSubCustomer: true, viaCustomer: name,
+            id: subId, name: match.canonical,
+            orders: [], totalValue: 0, skuMap: {},
+            isSubCustomer: true, viaCustomer: row.customer_name,
           };
         }
-        subCustomerMap[subId].orders.push({ date, value, qty, items: skuNames, status: order.order_status });
-        subCustomerMap[subId].totalValue += value;
-
-        lineItems.forEach(li => {
-          if (!subCustomerMap[subId].skuMap[li.name]) {
-            subCustomerMap[subId].skuMap[li.name] = { name: li.name, orders: [] };
-          }
-          subCustomerMap[subId].skuMap[li.name].orders.push({ date, qty: li.qty, value: li.value });
+        subCustomerMap[subId].orders.push({
+          date: new Date(row.date + 'T00:00:00'),
+          value: row.order_value,
+          qty: row.order_qty,
+          status: row.status,
         });
+        subCustomerMap[subId].totalValue += row.order_value;
       }
     }
-  });
-
-  const regularCustomers = Object.values(customerMap).map(buildCustomerStats);
-  const subCustomers = Object.values(subCustomerMap).map(buildCustomerStats);
-  return [...regularCustomers, ...subCustomers];
-}
-
-async function getOrderCycles({ bypassCache = false } = {}) {
-  const missing = ['ZOHO_CLIENT_ID', 'ZOHO_CLIENT_SECRET', 'ZOHO_REFRESH_TOKEN', 'ZOHO_ORG_ID']
-    .filter(k => !process.env[k]);
-  if (missing.length) throw new Error(`Missing env vars: ${missing.join(', ')}`);
-
-  const now = Date.now();
-  if (!bypassCache && cachedCycles && cyclesCachedAt && (now - cyclesCachedAt) < CACHE_DURATION_MS) {
-    return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: true };
   }
 
-  // If a fetch is already running, return the same promise instead of starting another
-  if (fetchInFlight) return fetchInFlight;
-
-  fetchInFlight = (async () => {
-    try {
-      const token = await getAccessToken();
-      console.log('🌐 [order-cycles] Fetching fresh orders from Zoho (last 18 months)...');
-      const orders = await fetchAllOrders(token);
-      const enriched = await enrichOrdersWithLineItems(orders, token);
-      cachedCycles = processOrders(enriched);
-      cyclesCachedAt = Date.now();
-      try {
-        fs.writeFileSync(DISK_CACHE_PATH, JSON.stringify({ customers: cachedCycles, cachedAt: cyclesCachedAt }));
-      } catch (e) {
-        console.warn('[order-cycles] Could not write disk cache:', e.message);
-      }
-      return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: false };
-    } finally {
-      fetchInFlight = null;
+  for (const li of lineItemRows) {
+    const c = customerMap[li.customer_id];
+    if (c) {
+      if (!c.skuMap[li.name]) c.skuMap[li.name] = { name: li.name, orders: [] };
+      c.skuMap[li.name].orders.push({
+        date: new Date(li.date + 'T00:00:00'),
+        qty: li.quantity,
+        value: li.item_total,
+      });
     }
-  })();
 
-  return fetchInFlight;
+    const ref = (li.reference_number || '').toLowerCase();
+    if (ref) {
+      const match = subLower.find(s => ref.includes(s.lower));
+      if (match) {
+        const sub = subCustomerMap[`sub_${match.lower}`];
+        if (sub) {
+          if (!sub.skuMap[li.name]) sub.skuMap[li.name] = { name: li.name, orders: [] };
+          sub.skuMap[li.name].orders.push({
+            date: new Date(li.date + 'T00:00:00'),
+            qty: li.quantity,
+            value: li.item_total,
+          });
+        }
+      }
+    }
+  }
+
+  const customers = [
+    ...Object.values(customerMap).map(buildCustomerStats),
+    ...Object.values(subCustomerMap).map(buildCustomerStats),
+  ];
+  return { customers, cachedAt: Date.now(), cached: false };
 }
 
 module.exports = { getOrderCycles };
