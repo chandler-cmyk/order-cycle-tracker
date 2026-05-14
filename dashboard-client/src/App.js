@@ -625,7 +625,7 @@ export default function App() {
       states.reload();
       products.reload();
       categories.reload();
-      reloadCycles(true);
+      reloadCycles();
     }
   }, [syncStatus]); // eslint-disable-line
 

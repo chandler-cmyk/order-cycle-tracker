@@ -57,6 +57,7 @@ let cachedToken = null;
 let tokenExpiry = null;
 let cachedCycles = null;
 let cyclesCachedAt = null;
+let fetchInFlight = null; // deduplicates concurrent requests
 
 // Load persisted cache from disk on startup
 try {
@@ -435,18 +436,29 @@ async function getOrderCycles({ bypassCache = false } = {}) {
     return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: true };
   }
 
-  const token = await getAccessToken();
-  console.log('🌐 [order-cycles] Fetching fresh orders from Zoho (last 18 months)...');
-  const orders = await fetchAllOrders(token);
-  const enriched = await enrichOrdersWithLineItems(orders, token);
-  cachedCycles = processOrders(enriched);
-  cyclesCachedAt = now;
-  try {
-    fs.writeFileSync(DISK_CACHE_PATH, JSON.stringify({ customers: cachedCycles, cachedAt: cyclesCachedAt }));
-  } catch (e) {
-    console.warn('[order-cycles] Could not write disk cache:', e.message);
-  }
-  return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: false };
+  // If a fetch is already running, return the same promise instead of starting another
+  if (fetchInFlight) return fetchInFlight;
+
+  fetchInFlight = (async () => {
+    try {
+      const token = await getAccessToken();
+      console.log('🌐 [order-cycles] Fetching fresh orders from Zoho (last 18 months)...');
+      const orders = await fetchAllOrders(token);
+      const enriched = await enrichOrdersWithLineItems(orders, token);
+      cachedCycles = processOrders(enriched);
+      cyclesCachedAt = Date.now();
+      try {
+        fs.writeFileSync(DISK_CACHE_PATH, JSON.stringify({ customers: cachedCycles, cachedAt: cyclesCachedAt }));
+      } catch (e) {
+        console.warn('[order-cycles] Could not write disk cache:', e.message);
+      }
+      return { customers: cachedCycles, cachedAt: cyclesCachedAt, cached: false };
+    } finally {
+      fetchInFlight = null;
+    }
+  })();
+
+  return fetchInFlight;
 }
 
 module.exports = { getOrderCycles };
