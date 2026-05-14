@@ -525,14 +525,19 @@ export default function App() {
   }, [authed]);
 
   // ── Prefetch order cycles in background so Customers tab loads instantly ─────
-  useEffect(() => {
-    if (!authed) return;
+  const reloadCycles = useCallback((bypassCache = false) => {
     setCyclesPrefetching(true);
-    fetch('/api/dashboard/order-cycles')
+    const url = bypassCache ? '/api/dashboard/order-cycles?refresh=true' : '/api/dashboard/order-cycles';
+    fetch(url)
       .then(r => r.json())
       .then(d => { setPrefetchedCycles(d); setCyclesPrefetching(false); })
       .catch(() => setCyclesPrefetching(false));
-  }, [authed]);
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    reloadCycles();
+  }, [authed, reloadCycles]);
 
   // ── Sync status polling ──────────────────────────────────────────────────────
   const pollSync = useCallback(() => {
@@ -620,6 +625,7 @@ export default function App() {
       states.reload();
       products.reload();
       categories.reload();
+      reloadCycles(true);
     }
   }, [syncStatus]); // eslint-disable-line
 
