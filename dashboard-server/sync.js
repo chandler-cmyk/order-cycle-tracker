@@ -564,11 +564,12 @@ async function syncSalesOrders(token, deltaFilter) {
     `SELECT last_modified_time FROM sales_orders WHERE salesorder_id = ?`
   );
 
-  // Always do a full sync if the table is empty, even if invoices have been synced before
-  const soCount = db.prepare(`SELECT COUNT(*) AS c FROM sales_orders`).get()?.c || 0;
-  let effectiveDeltaFilter = soCount === 0 ? null : deltaFilter;
-  if (soCount === 0 && deltaFilter) {
-    console.log(`  ℹ️  sales_orders table is empty — performing full sync regardless of delta filter`);
+  // Use a dedicated meta key so the initial full sync only runs once,
+  // regardless of whether invoices have already been synced before.
+  const soInitialDone = db.prepare(`SELECT value FROM sync_meta WHERE key = 'sales_orders_initial_sync_done'`).get();
+  let effectiveDeltaFilter = soInitialDone ? deltaFilter : null;
+  if (!soInitialDone) {
+    console.log(`  ℹ️  First sales order sync — performing full pull of all history`);
   }
 
   let allSOs = [];
@@ -669,6 +670,9 @@ async function syncSalesOrders(token, deltaFilter) {
   }
 
   console.log(`  ✅ Sales orders: ${processed} saved, ${skipped} skipped, ${failed} failed`);
+  if (!soInitialDone) {
+    db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('sales_orders_initial_sync_done', 'true')`).run();
+  }
 }
 
 // ── Core sync logic ────────────────────────────────────────────────────────────
