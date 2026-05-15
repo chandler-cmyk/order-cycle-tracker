@@ -564,10 +564,16 @@ async function syncSalesOrders(token, deltaFilter) {
     `SELECT last_modified_time FROM sales_orders WHERE salesorder_id = ?`
   );
 
+  // Always do a full sync if the table is empty, even if invoices have been synced before
+  const soCount = db.prepare(`SELECT COUNT(*) AS c FROM sales_orders`).get()?.c || 0;
+  let effectiveDeltaFilter = soCount === 0 ? null : deltaFilter;
+  if (soCount === 0 && deltaFilter) {
+    console.log(`  ℹ️  sales_orders table is empty — performing full sync regardless of delta filter`);
+  }
+
   let allSOs = [];
   let page = 1;
   let hasMore = true;
-  let effectiveDeltaFilter = deltaFilter;
 
   while (hasMore) {
     syncState.progress = `Fetching sales order list — page ${page}...`;
