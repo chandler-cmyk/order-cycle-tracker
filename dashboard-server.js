@@ -145,8 +145,8 @@ function buildWhereClause(query) {
   const invCond   = [`i.date BETWEEN ? AND ?`, `i.status NOT IN ('void','draft')`];
   const invParams = [s, e];
 
-  // Credit note side: Sales by Item includes open/closed CNs, not approved drafts.
-  const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft','approved')`];
+  // Credit note side: Sales by Item includes open/closed/approved CNs — only void and draft are excluded.
+  const cnCond   = [`cn.date BETWEEN ? AND ?`, `cn.status NOT IN ('void','draft')`];
   const cnParams = [s, e];
 
   // Sales returns are available for diagnostics, but Sales by Item does not subtract them separately.
@@ -639,7 +639,7 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
         SELECT cn.date AS raw_date, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
       )
       GROUP BY raw_date ORDER BY raw_date ASC
     `).all([customerId, s, e, customerId, s, e]);
@@ -657,7 +657,7 @@ app.get('/api/dashboard/customers/:id', (req, res) => {
         SELECT cni.sku, cni.name, cni.brand, cni.category, -cni.quantity AS qty, -cni.item_total AS amount
         FROM credit_notes cn
         JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
+        WHERE cn.customer_id = ? AND cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
       )
       GROUP BY sku, name, brand, category
       ORDER BY revenue DESC LIMIT 10
@@ -925,7 +925,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
         SELECT strftime('%Y-%m', cn.date) AS period,
                -SUM(cni.item_total) AS revenue, 0 AS orders, -SUM(cni.quantity) AS units
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.status NOT IN ('void','draft','approved')
+        WHERE cn.status NOT IN ('void','draft')
         GROUP BY period
       )
       GROUP BY period ORDER BY period ASC
@@ -973,7 +973,7 @@ app.get('/api/dashboard/forecast', (req, res) => {
         UNION ALL
         SELECT strftime('%Y-%m', cn.date) AS period, cni.category, -SUM(cni.item_total) AS revenue
         FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-        WHERE cn.status NOT IN ('void','draft','approved') AND cni.category != ''
+        WHERE cn.status NOT IN ('void','draft') AND cni.category != ''
         GROUP BY period, cni.category
       )
       GROUP BY period, category ORDER BY period ASC
@@ -1027,7 +1027,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
     const cnTotal = db.prepare(`
       SELECT COALESCE(SUM(cni.item_total), 0) AS total, COUNT(DISTINCT cn.creditnote_id) AS count
       FROM credit_notes cn JOIN credit_note_items cni ON cn.creditnote_id = cni.creditnote_id
-      WHERE cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft','approved')
+      WHERE cn.date BETWEEN ? AND ? AND cn.status NOT IN ('void','draft')
     `).get([s, e]);
 
     const srTotal = db.prepare(`
@@ -1055,7 +1055,7 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       JOIN sales_return_credit_notes srcn ON srcn.salesreturn_id = sr.salesreturn_id
       JOIN credit_notes cn ON cn.creditnote_id = srcn.creditnote_id
       WHERE sr.date BETWEEN ? AND ? AND sr.status NOT IN ('void','draft')
-        AND cn.status NOT IN ('void','draft','approved')
+        AND cn.status NOT IN ('void','draft')
       GROUP BY sr.salesreturn_id, cn.creditnote_id
       ORDER BY sr.date DESC, cn.date DESC
     `).all([s, e]);
@@ -1128,6 +1128,15 @@ app.listen(PORT, () => {
     console.log(`📂 ${invCount} invoices in DB. Running delta sync for updates...`);
   }
   startSync().catch(e => console.error('Auto-sync failed:', e.message));
+
+  // Periodic delta sync every 2 hours so credit notes and invoices stay current
+  const SYNC_INTERVAL_MS = 2 * 60 * 60 * 1000;
+  setInterval(() => {
+    if (!syncState.syncing) {
+      console.log('⏰ Scheduled sync starting...');
+      startSync().catch(e => console.error('Scheduled sync error:', e.message));
+    }
+  }, SYNC_INTERVAL_MS);
 });
 
 // SPA fallback — serve index.html for any non-API route

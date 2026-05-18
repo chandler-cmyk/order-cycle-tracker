@@ -255,7 +255,6 @@ async function syncCreditNotes(token, deltaFilter) {
     `SELECT last_modified_time FROM credit_notes WHERE creditnote_id = ?`
   );
 
-  // Collect all credit note headers
   let allCNs = [];
   let page = 1;
   let hasMore = true;
@@ -840,4 +839,4 @@ async function startSync() {
   }
 }
 
-module.exports = { syncState, startSync };
+module.exports = { syncState, startSync, syncCreditNotes, getAccessToken };
