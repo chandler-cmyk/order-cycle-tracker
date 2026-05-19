@@ -189,5 +189,6 @@ try { db.exec(`ALTER TABLE sales_returns ADD COLUMN invoice_id TEXT`); } catch (
 try { db.exec(`ALTER TABLE sales_returns ADD COLUMN linked_creditnote_sync_version INTEGER DEFAULT 0`); } catch (_) {}
 try { db.exec(`ALTER TABLE invoices ADD COLUMN discount_total REAL DEFAULT 0`); } catch (_) {}
 try { db.exec(`ALTER TABLE invoices ADD COLUMN sales_by_item_sync_version INTEGER DEFAULT 0`); } catch (_) {}
+try { db.exec(`ALTER TABLE sales_orders ADD COLUMN cf_sub_customer TEXT DEFAULT ''`); } catch (_) {}
 
 module.exports = db;

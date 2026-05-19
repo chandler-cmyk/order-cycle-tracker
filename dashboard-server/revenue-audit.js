@@ -261,7 +261,7 @@ function saveRevenueReference(db, input) {
   const periodKey = input.periodKey || 'CUSTOM';
   const start = input.start;
   const end = input.end;
-  const zohoRevenue = Number(input.zohoRevenue);
+  const zohoRevenue = Number(String(input.zohoRevenue ?? '').replace(/,/g, ''));
   if (!start || !end) throw new Error('start and end are required');
   if (!Number.isFinite(zohoRevenue)) throw new Error('zohoRevenue must be a number');
   const now = new Date().toISOString();

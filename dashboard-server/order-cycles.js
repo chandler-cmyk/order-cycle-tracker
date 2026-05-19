@@ -190,7 +190,7 @@ function getOrderCycles() {
 
   const orderRows = db.prepare(`
     SELECT customer_id, customer_name, date, status,
-           total AS order_value, quantity AS order_qty, reference_number
+           total AS order_value, quantity AS order_qty, reference_number, cf_sub_customer
     FROM sales_orders
     WHERE date >= ?
       AND status NOT IN ('void', 'cancelled', 'draft')
@@ -198,7 +198,7 @@ function getOrderCycles() {
   `).all(cutoffStr);
 
   const lineItemRows = db.prepare(`
-    SELECT so.customer_id, so.reference_number, li.name, so.date,
+    SELECT so.customer_id, so.reference_number, so.cf_sub_customer, li.name, so.date,
            li.quantity, li.item_total
     FROM sales_orders so
     JOIN sales_order_line_items li ON li.salesorder_id = so.salesorder_id
@@ -226,26 +226,30 @@ function getOrderCycles() {
     });
     c.totalValue += row.order_value;
 
-    const ref = (row.reference_number || '').toLowerCase();
-    if (ref) {
-      const match = subLower.find(s => ref.includes(s.lower));
-      if (match) {
-        const subId = `sub_${match.lower}`;
-        if (!subCustomerMap[subId]) {
-          subCustomerMap[subId] = {
-            id: subId, name: match.canonical,
-            orders: [], totalValue: 0, skuMap: {},
-            isSubCustomer: true, viaCustomer: row.customer_name,
-          };
-        }
-        subCustomerMap[subId].orders.push({
-          date: new Date(row.date + 'T00:00:00'),
-          value: row.order_value,
-          qty: row.order_qty,
-          status: row.status,
-        });
-        subCustomerMap[subId].totalValue += row.order_value;
+    let subName = (row.cf_sub_customer || '').trim();
+    if (!subName) {
+      const ref = (row.reference_number || '').toLowerCase();
+      if (ref) {
+        const match = subLower.find(s => ref.includes(s.lower));
+        if (match) subName = match.canonical;
       }
+    }
+    if (subName) {
+      const subId = `sub_${subName.toLowerCase()}`;
+      if (!subCustomerMap[subId]) {
+        subCustomerMap[subId] = {
+          id: subId, name: subName,
+          orders: [], totalValue: 0, skuMap: {},
+          isSubCustomer: true, viaCustomer: row.customer_name,
+        };
+      }
+      subCustomerMap[subId].orders.push({
+        date: new Date(row.date + 'T00:00:00'),
+        value: row.order_value,
+        qty: row.order_qty,
+        status: row.status,
+      });
+      subCustomerMap[subId].totalValue += row.order_value;
     }
   }
 
@@ -260,19 +264,23 @@ function getOrderCycles() {
       });
     }
 
-    const ref = (li.reference_number || '').toLowerCase();
-    if (ref) {
-      const match = subLower.find(s => ref.includes(s.lower));
-      if (match) {
-        const sub = subCustomerMap[`sub_${match.lower}`];
-        if (sub) {
-          if (!sub.skuMap[li.name]) sub.skuMap[li.name] = { name: li.name, orders: [] };
-          sub.skuMap[li.name].orders.push({
-            date: new Date(li.date + 'T00:00:00'),
-            qty: li.quantity,
-            value: li.item_total,
-          });
-        }
+    let liSubName = (li.cf_sub_customer || '').trim();
+    if (!liSubName) {
+      const ref = (li.reference_number || '').toLowerCase();
+      if (ref) {
+        const match = subLower.find(s => ref.includes(s.lower));
+        if (match) liSubName = match.canonical;
+      }
+    }
+    if (liSubName) {
+      const sub = subCustomerMap[`sub_${liSubName.toLowerCase()}`];
+      if (sub) {
+        if (!sub.skuMap[li.name]) sub.skuMap[li.name] = { name: li.name, orders: [] };
+        sub.skuMap[li.name].orders.push({
+          date: new Date(li.date + 'T00:00:00'),
+          qty: li.quantity,
+          value: li.item_total,
+        });
       }
     }
   }

@@ -199,8 +199,8 @@ const _saveInvoiceTx = db.transaction((inv, lineItems) => {
 // ── Sales order DB helpers ─────────────────────────────────────────────────────
 const _upsertSalesOrder = db.prepare(`
   INSERT OR REPLACE INTO sales_orders
-    (salesorder_id, salesorder_number, customer_id, customer_name, date, status, reference_number, total, quantity, last_modified_time)
-  VALUES (?,?,?,?,?,?,?,?,?,?)
+    (salesorder_id, salesorder_number, customer_id, customer_name, date, status, reference_number, total, quantity, last_modified_time, cf_sub_customer)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?)
 `);
 const _deleteSOLineItems = db.prepare(`DELETE FROM sales_order_line_items WHERE salesorder_id = ?`);
 const _insertSOLineItem  = db.prepare(`
@@ -211,7 +211,8 @@ const _insertSOLineItem  = db.prepare(`
 const _saveSalesOrderTx = db.transaction((so, lineItems) => {
   _upsertSalesOrder.run(
     so.salesorder_id, so.salesorder_number, so.customer_id, so.customer_name,
-    so.date, so.status, so.reference_number, so.total, so.quantity, so.last_modified_time
+    so.date, so.status, so.reference_number, so.total, so.quantity, so.last_modified_time,
+    so.cf_sub_customer || ''
   );
   _deleteSOLineItems.run(so.salesorder_id);
   for (const li of lineItems) {
@@ -644,6 +645,9 @@ async function syncSalesOrders(token, deltaFilter) {
         return { ...li, name: correctedName, brand, category };
       });
 
+      const cfSubCustomer = (Array.isArray(so.custom_fields) ? so.custom_fields : [])
+        .find(f => f.api_name === 'cf_sub_customer')?.value || '';
+
       _saveSalesOrderTx(
         {
           salesorder_id:     so.salesorder_id,
@@ -656,6 +660,7 @@ async function syncSalesOrders(token, deltaFilter) {
           total:             parseFloat(so.total) || 0,
           quantity:          parseFloat(so.quantity) || 0,
           last_modified_time: so.last_modified_time || '',
+          cf_sub_customer:   cfSubCustomer,
         },
         enrichedItems
       );
