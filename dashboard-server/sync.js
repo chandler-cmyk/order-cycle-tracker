@@ -2,6 +2,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const db = require('./db');
 const { inferBrandCategory } = require('./categorize');
+const { latestAuditSummary, recordStandardRevenueAudits } = require('./revenue-audit');
 
 const { ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ORG_ID } = process.env;
 const BASE = 'https://www.zohoapis.com/inventory/v1';
@@ -15,6 +16,7 @@ const syncState = {
   lastSync: null,
   invoiceCount: 0,
   lineItemCount: 0,
+  audit: null,
   error: null,
 };
 
@@ -26,6 +28,7 @@ try {
   const lc = db.prepare(`SELECT COUNT(*) as c FROM line_items`).get();
   syncState.invoiceCount = ic?.c || 0;
   syncState.lineItemCount = lc?.c || 0;
+  syncState.audit = latestAuditSummary(db);
 } catch (_) {}
 
 // ── Zoho auth ──────────────────────────────────────────────────────────────────
@@ -722,6 +725,55 @@ async function reconcileRecentInvoices(token) {
   })();
 }
 
+// Fetches the Zoho credit note list for the last 90 days and removes local
+// credit notes that were deleted in Zoho after a prior sync.
+async function reconcileRecentCreditNotes(token) {
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${token}`,
+    'X-com-zoho-inventory-organizationid': ZOHO_ORG_ID,
+  };
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90);
+  const fromDate = cutoff.toISOString().slice(0, 10);
+
+  const zohoIds = new Set();
+  let page = 1;
+  while (true) {
+    const url = `${BASE}/creditnotes?organization_id=${ZOHO_ORG_ID}&date_start=${fromDate}&per_page=200&page=${page}`;
+    const res = await fetchWithRetry(url, headers);
+    if (!res || !res.ok) {
+      let body = '';
+      try { body = await res.text(); } catch (_) {}
+      throw new Error(`Credit note reconciliation failed (page ${page}): ${res?.status} ${body.slice(0, 160)}`);
+    }
+    const data = await res.json();
+    const creditNotes = data.creditnotes || [];
+    for (const cn of creditNotes) zohoIds.add(cn.creditnote_id);
+    if (!data.page_context?.has_more_page) break;
+    page++;
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  const dbCreditNotes = db.prepare(
+    `SELECT creditnote_id, creditnote_number FROM credit_notes WHERE date >= ?`
+  ).all(fromDate);
+  const phantoms = dbCreditNotes.filter(r => !zohoIds.has(r.creditnote_id));
+  if (phantoms.length === 0) {
+    console.log(`  ✅ No phantom credit notes found`);
+    return;
+  }
+
+  console.log(`  🗑  Removing ${phantoms.length} phantom credit note(s) deleted from Zoho:`);
+  db.transaction(() => {
+    for (const p of phantoms) {
+      console.log(`    - ${p.creditnote_number} (${p.creditnote_id})`);
+      db.prepare(`DELETE FROM sales_return_credit_notes WHERE creditnote_id = ?`).run(p.creditnote_id);
+      db.prepare(`DELETE FROM credit_note_items WHERE creditnote_id = ?`).run(p.creditnote_id);
+      db.prepare(`DELETE FROM credit_notes WHERE creditnote_id = ?`).run(p.creditnote_id);
+    }
+  })();
+}
+
 // ── Core sync logic ────────────────────────────────────────────────────────────
 async function startSync() {
   if (syncState.syncing) {
@@ -866,12 +918,14 @@ async function startSync() {
     const discountToken = await getAccessToken();
     await backfillSalesByItemInvoiceDiscounts(discountToken);
 
-    // ── Phase 6: reconcile recent invoices against Zoho to remove phantoms ────
-    // Invoices deleted in Zoho won't appear in delta syncs; this lightweight
-    // list-only check catches them by comparing Zoho's list to our DB.
+    // ── Phase 6: reconcile recent transactions against Zoho to remove phantoms ─
+    // Deleted invoices/credit notes won't appear in delta syncs; list-only checks
+    // catch them by comparing Zoho's current list to our DB.
     console.log(`\n🔍 Reconciling last 90 days of invoices against Zoho...`);
     const reconcileToken = await getAccessToken();
     await reconcileRecentInvoices(reconcileToken);
+    console.log(`\n🔍 Reconciling last 90 days of credit notes against Zoho...`);
+    await reconcileRecentCreditNotes(reconcileToken);
 
     // ── Phase 7: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
@@ -884,6 +938,10 @@ async function startSync() {
     syncState.invoiceCount = ic?.c || 0;
     syncState.lineItemCount = lc?.c || 0;
     syncState.progress = `Done — ${syncState.invoiceCount} invoices, ${cnc?.c || 0} credit notes, ${src?.c || 0} sales returns`;
+
+    console.log(`\n📊 Running revenue audit checks...`);
+    syncState.audit = recordStandardRevenueAudits(db, { syncLastSync: syncState.lastSync });
+    console.log(`  ✅ Revenue audits recorded (${syncState.audit.status})`);
 
   } catch (e) {
     console.error('❌ Sync error:', e.message);

@@ -13,6 +13,7 @@ import TopSkusLeaderboard from './components/TopSkusLeaderboard';
 import OutstandingInvoicesTile from './components/OutstandingInvoicesTile';
 import BrandComparison from './components/BrandComparison';
 import ForecastTab from './components/ForecastTab';
+import RevenueAuditPanel from './components/RevenueAuditPanel';
 
 // ── Nav items ──────────────────────────────────────────────────────────────────
 const NAV = [
@@ -22,11 +23,18 @@ const NAV = [
   { id: 'products',   label: 'Products',   icon: '☰' },
   { id: 'customers',  label: 'Customers',  icon: '◉' },
   { id: 'forecast',   label: 'Forecast',   icon: '◌' },
+  { id: 'audit',      label: 'Revenue Audit', icon: '$' },
 ];
 
 // ── Sync status bar ────────────────────────────────────────────────────────────
 function SyncBar({ syncStatus, onSync }) {
   const isSyncing = syncStatus?.syncing;
+  const audit = syncStatus?.audit;
+  const auditTone = audit?.status === 'fail'
+    ? { bg: '#fef2f2', border: '#fecaca', text: '#991b1b', label: 'Audit fail' }
+    : audit?.status === 'pass'
+      ? { bg: '#ecfdf5', border: '#bbf7d0', text: '#166534', label: 'Audit pass' }
+      : { bg: '#f8fafc', border: C.border, text: C.textMute, label: 'Audit unchecked' };
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
@@ -48,6 +56,18 @@ function SyncBar({ syncStatus, onSync }) {
           </span>
           {syncStatus?.invoiceCount > 0 && (
             <span style={{ color: C.textMute }}>· {syncStatus.invoiceCount.toLocaleString()} invoices</span>
+          )}
+          {audit && (
+            <span style={{
+              border: `1px solid ${auditTone.border}`,
+              background: auditTone.bg,
+              color: auditTone.text,
+              borderRadius: 999,
+              padding: '2px 7px',
+              fontWeight: 700,
+            }}>
+              {auditTone.label}
+            </span>
           )}
           {syncStatus?.error && (
             <span style={{ color: '#dc2626', fontWeight: 500 }}>⚠ {syncStatus.error}</span>
@@ -696,6 +716,7 @@ export default function App() {
     products:  'Products',
     customers: 'Customers',
     forecast:  'Sales Forecast',
+    audit:     'Revenue Audit',
   };
 
   const header = (
@@ -832,6 +853,14 @@ export default function App() {
       );
 
       case 'forecast': return <ForecastTab />;
+
+      case 'audit': return (
+        <RevenueAuditPanel
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          syncStatus={syncStatus}
+        />
+      );
 
       default: return null;
     }

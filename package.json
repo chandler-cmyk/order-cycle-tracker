@@ -14,7 +14,8 @@
     "dashboard:server": "node dashboard-server.js",
     "dashboard:client": "cd dashboard-client && npm start",
     "dashboard:build": "cd dashboard-client && npm install && npm run build",
-    "inventory": "node inventory-server.js"
+    "inventory": "node inventory-server.js",
+    "test:revenue-audit": "node dashboard-server/revenue-audit.fixture.test.js"
   },
   "engines": {
     "node": "20.x"

@@ -9,6 +9,18 @@ const db = require('./dashboard-server/db');
 const { syncState, startSync } = require('./dashboard-server/sync');
 const { inferBrandCategory, CATEGORIES } = require('./dashboard-server/categorize');
 const { getOrderCycles } = require('./dashboard-server/order-cycles');
+const {
+  invoiceReportStatus,
+  creditNoteReportStatus,
+  invoiceNetAmountExpr,
+  invoiceDiscountAllocationExpr,
+  calculateRevenueAudit,
+  saveRevenueReference,
+  saveRevenueAuditRun,
+  recordStandardRevenueAudits,
+  auditHistory,
+  standardPeriods,
+} = require('./dashboard-server/revenue-audit');
 
 // ── Known item name misspellings → canonical names ────────────────────────────
 const NAME_CORRECTIONS = {
@@ -69,16 +81,6 @@ const tokenTtlHoursRaw = Number.parseInt(process.env.SITE_TOKEN_TTL_HOURS || '12
 const TOKEN_TTL_HOURS = Number.isFinite(tokenTtlHoursRaw) && tokenTtlHoursRaw > 0 ? tokenTtlHoursRaw : 12;
 const TOKEN_TTL_MS = TOKEN_TTL_HOURS * 60 * 60 * 1000;
 const INCLUDE_SALES_RETURNS = false;
-const SALES_BY_ITEM_INVOICE_STATUSES = "'sent','overdue','paid','partially_paid'";
-const SALES_BY_ITEM_CREDIT_NOTE_STATUSES = "'open','closed'";
-
-function invoiceReportStatus(alias = 'i') {
-  return `${alias}.status IN (${SALES_BY_ITEM_INVOICE_STATUSES})`;
-}
-
-function creditNoteReportStatus(alias = 'cn') {
-  return `${alias}.status IN (${SALES_BY_ITEM_CREDIT_NOTE_STATUSES})`;
-}
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
 app.use(cors(ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN } : {}));
@@ -223,20 +225,6 @@ function revenueUnion(w, invFields, cnFields, srFields) {
   )`;
 }
 
-function invoiceSubtotalExpr(invAlias = 'i') {
-  return `(SELECT COALESCE(SUM(li_sub.item_total), 0) FROM line_items li_sub WHERE li_sub.invoice_id = ${invAlias}.invoice_id)`;
-}
-
-function invoiceDiscountAllocationExpr(invAlias = 'i', liAlias = 'li') {
-  const subtotal = invoiceSubtotalExpr(invAlias);
-  return `CASE WHEN COALESCE(${invAlias}.discount_total, 0) > 0 AND ${subtotal} > 0 THEN COALESCE(${invAlias}.discount_total, 0) * ${liAlias}.item_total / ${subtotal} ELSE 0 END`;
-}
-
-function invoiceNetAmountExpr(invAlias = 'i', liAlias = 'li') {
-  return `(${liAlias}.item_total - ${invoiceDiscountAllocationExpr(invAlias, liAlias)})`;
-}
-
-
 // ── Sync endpoints ─────────────────────────────────────────────────────────────
 
 // GET /api/sync/status
@@ -247,6 +235,7 @@ app.get('/api/sync/status', (_req, res) => {
     lastSync:      syncState.lastSync,
     invoiceCount:  syncState.invoiceCount,
     lineItemCount: syncState.lineItemCount,
+    audit:         syncState.audit || null,
     error:         syncState.error,
   });
 });
@@ -1096,6 +1085,67 @@ app.get('/api/dashboard/revenue-debug', (req, res) => {
       srWithLinkedCn:    linkedSrDeduction.seen.size,
       srCnOverlap:       srWithLinkedCn,
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Revenue audit and parity checks ────────────────────────────────────────────
+
+// GET /api/dashboard/revenue-audit?start=&end=&periodKey=
+app.get('/api/dashboard/revenue-audit', (req, res) => {
+  try {
+    const today = new Date();
+    const fallback = standardPeriods(today)[0];
+    const start = req.query.start || fallback.start;
+    const end = req.query.end || fallback.end;
+    const periodKey = req.query.periodKey || (start === fallback.start && end === fallback.end ? fallback.periodKey : 'CUSTOM');
+    res.json(calculateRevenueAudit(db, { start, end, periodKey }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dashboard/revenue-audit/history?limit=20
+app.get('/api/dashboard/revenue-audit/history', (req, res) => {
+  try {
+    res.json({ items: auditHistory(db, req.query.limit) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dashboard/revenue-audit/periods
+app.get('/api/dashboard/revenue-audit/periods', (_req, res) => {
+  try {
+    res.json({ periods: standardPeriods() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/revenue-audit/reference
+app.post('/api/dashboard/revenue-audit/reference', (req, res) => {
+  try {
+    const reference = saveRevenueReference(db, req.body || {});
+    const audit = calculateRevenueAudit(db, {
+      start: reference.start,
+      end: reference.end,
+      periodKey: reference.periodKey,
+    });
+    saveRevenueAuditRun(db, audit, syncState.lastSync || null);
+    res.json({ reference, audit });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/dashboard/revenue-audit/run
+app.post('/api/dashboard/revenue-audit/run', (_req, res) => {
+  try {
+    const summary = recordStandardRevenueAudits(db, { syncLastSync: syncState.lastSync || null });
+    syncState.audit = summary;
+    res.json(summary);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

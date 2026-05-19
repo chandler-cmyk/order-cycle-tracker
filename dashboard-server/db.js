@@ -149,6 +149,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_so_date      ON sales_orders(date);
   CREATE INDEX IF NOT EXISTS idx_so_status    ON sales_orders(status);
   CREATE INDEX IF NOT EXISTS idx_soli_so      ON sales_order_line_items(salesorder_id);
+
+  CREATE TABLE IF NOT EXISTS revenue_audit_references (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_key   TEXT NOT NULL,
+    start_date   TEXT NOT NULL,
+    end_date     TEXT NOT NULL,
+    zoho_revenue REAL NOT NULL,
+    source       TEXT DEFAULT 'manual',
+    notes        TEXT DEFAULT '',
+    updated_at   TEXT NOT NULL,
+    UNIQUE(period_key, start_date, end_date)
+  );
+
+  CREATE TABLE IF NOT EXISTS revenue_audit_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_key        TEXT NOT NULL,
+    start_date        TEXT NOT NULL,
+    end_date          TEXT NOT NULL,
+    dashboard_revenue REAL NOT NULL,
+    zoho_revenue      REAL,
+    delta             REAL,
+    status            TEXT NOT NULL,
+    tolerance         REAL DEFAULT 0.01,
+    source            TEXT,
+    details_json      TEXT,
+    sync_last_sync    TEXT,
+    created_at        TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rev_audit_runs_period ON revenue_audit_runs(period_key, start_date, end_date);
+  CREATE INDEX IF NOT EXISTS idx_rev_audit_runs_status ON revenue_audit_runs(status);
+  CREATE INDEX IF NOT EXISTS idx_rev_audit_runs_created ON revenue_audit_runs(created_at);
 `);
 
 // Idempotent migrations — add columns that may not exist in older DBs
