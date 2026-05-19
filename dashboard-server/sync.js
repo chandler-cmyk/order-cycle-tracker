@@ -674,6 +674,54 @@ async function syncSalesOrders(token, deltaFilter) {
   }
 }
 
+// ── Phantom invoice reconciliation ────────────────────────────────────────────
+// Fetches the Zoho invoice list for the last 90 days and removes any invoices
+// from our DB that no longer exist in Zoho (deleted invoices we can't detect
+// via delta sync since deletions don't trigger last_modified_time updates).
+async function reconcileRecentInvoices(token) {
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${token}`,
+    'X-com-zoho-inventory-organizationid': ZOHO_ORG_ID,
+  };
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90);
+  const fromDate = cutoff.toISOString().slice(0, 10);
+
+  // Fetch all Zoho invoice IDs for the last 90 days (list only, no details)
+  const zohoIds = new Set();
+  let page = 1;
+  while (true) {
+    const url = `${BASE}/invoices?organization_id=${ZOHO_ORG_ID}&date_start=${fromDate}&per_page=200&page=${page}`;
+    const res = await fetchWithRetry(url, headers);
+    const data = await res.json();
+    const invs = data.invoices || [];
+    for (const inv of invs) zohoIds.add(inv.invoice_id);
+    if (!data.page_context?.has_more_page) break;
+    page++;
+    await new Promise(r => setTimeout(r, REQUEST_DELAY_MS));
+  }
+
+  // Find invoices in our DB (for the same period) not in Zoho's list
+  const dbInvs = db.prepare(
+    `SELECT invoice_id, invoice_number FROM invoices WHERE date >= ?`
+  ).all(fromDate);
+
+  const phantoms = dbInvs.filter(r => !zohoIds.has(r.invoice_id));
+  if (phantoms.length === 0) {
+    console.log(`  ✅ No phantom invoices found`);
+    return;
+  }
+
+  console.log(`  🗑  Removing ${phantoms.length} phantom invoice(s) deleted from Zoho:`);
+  db.transaction(() => {
+    for (const p of phantoms) {
+      console.log(`    - ${p.invoice_number} (${p.invoice_id})`);
+      db.prepare(`DELETE FROM line_items WHERE invoice_id = ?`).run(p.invoice_id);
+      db.prepare(`DELETE FROM invoices WHERE invoice_id = ?`).run(p.invoice_id);
+    }
+  })();
+}
+
 // ── Core sync logic ────────────────────────────────────────────────────────────
 async function startSync() {
   if (syncState.syncing) {
@@ -818,7 +866,14 @@ async function startSync() {
     const discountToken = await getAccessToken();
     await backfillSalesByItemInvoiceDiscounts(discountToken);
 
-    // ── Phase 6: update meta ───────────────────────────────────────────────────
+    // ── Phase 6: reconcile recent invoices against Zoho to remove phantoms ────
+    // Invoices deleted in Zoho won't appear in delta syncs; this lightweight
+    // list-only check catches them by comparing Zoho's list to our DB.
+    console.log(`\n🔍 Reconciling last 90 days of invoices against Zoho...`);
+    const reconcileToken = await getAccessToken();
+    await reconcileRecentInvoices(reconcileToken);
+
+    // ── Phase 7: update meta ───────────────────────────────────────────────────
     db.prepare(`INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_sync_time', ?)`).run(syncStart.toISOString());
     syncState.lastSync = syncStart.toISOString();
 
